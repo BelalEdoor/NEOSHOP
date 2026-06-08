@@ -1,0 +1,186 @@
+"""
+mqtt/client.py
+==============
+خدمة MQTT المركزية — تربط الـ Backend بـ ESP32 وRaspberry Pi.
+
+Topics المستخدمة:
+  cart/items           ← تحديثات السلة من/إلى Raspberry Pi
+  cart/session         ← بيانات جلسة التسوق
+  cart/status          ← تغييرات حالة السلة
+  cart/rfid            ← إشعار قراءة RFID من Raspberry Pi
+  payment/request      → من ESP32: طلب بيانات الفاتورة
+  payment/status       ← من/إلى ESP32: حالة الدفع
+  payment/coins        ← من ESP32: تتبع العملات المعدنية
+  payment/bills        ← من ESP32: تتبع الأوراق النقدية
+  payment/complete     ← من ESP32: اكتمال الدفع
+"""
+import json
+import logging
+import asyncio
+from typing import Callable, Dict, List, Optional
+import paho.mqtt.client as mqtt
+from core.config import settings
+
+log = logging.getLogger("neoshop.mqtt")
+
+
+# ─── Topic Constants ──────────────────────────────────────────────────────────
+class Topics:
+    # Shopping Topics
+    CART_ITEMS   = "cart/items"
+    CART_SESSION = "cart/session"
+    CART_STATUS  = "cart/status"
+    CART_RFID    = "cart/rfid"
+
+    # Payment Topics
+    PAYMENT_REQUEST  = "payment/request"
+    PAYMENT_STATUS   = "payment/status"
+    PAYMENT_COINS    = "payment/coins"
+    PAYMENT_BILLS    = "payment/bills"
+    PAYMENT_COMPLETE = "payment/complete"
+
+    # Theft Detection
+    THEFT_ALERT  = "security/theft_alert"
+    BRAKE_CONTROL = "security/brake"
+
+
+class MQTTService:
+    """
+    خدمة MQTT Singleton — تُنشأ مرة واحدة عند بدء التطبيق.
+    تُدير الاتصال مع Broker وتوزّع الرسائل على الـ handlers.
+    """
+
+    def __init__(self):
+        self._client: Optional[mqtt.Client] = None
+        self._handlers: Dict[str, List[Callable]] = {}
+        self._connected = False
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        # Callback لإرسال تحديثات WebSocket عند استلام رسائل MQTT
+        self.on_payment_update: Optional[Callable] = None
+        self.on_theft_alert: Optional[Callable] = None
+
+    def setup(self, loop: asyncio.AbstractEventLoop):
+        """يُستدعى مرة واحدة عند بدء FastAPI."""
+        self._loop = loop
+        self._client = mqtt.Client(client_id="neoshop-backend", protocol=mqtt.MQTTv311)
+        self._client.on_connect    = self._on_connect
+        self._client.on_disconnect = self._on_disconnect
+        self._client.on_message    = self._on_message
+
+        if settings.MQTT_USERNAME:
+            self._client.username_pw_set(settings.MQTT_USERNAME, settings.MQTT_PASSWORD)
+
+        try:
+            self._client.connect(settings.MQTT_BROKER_HOST, settings.MQTT_BROKER_PORT, 60)
+            self._client.loop_start()
+            log.info(f"[MQTT] Connecting to {settings.MQTT_BROKER_HOST}:{settings.MQTT_BROKER_PORT}")
+        except Exception as e:
+            log.warning(f"[MQTT] Could not connect: {e} — running without MQTT")
+
+    def _on_connect(self, client, userdata, flags, rc):
+        if rc == 0:
+            self._connected = True
+            log.info("[MQTT] Connected to broker ✓")
+            # الاشتراك في جميع topics المطلوبة
+            topics = [
+                Topics.PAYMENT_REQUEST,
+                Topics.PAYMENT_COINS,
+                Topics.PAYMENT_BILLS,
+                Topics.PAYMENT_COMPLETE,
+                Topics.CART_RFID,
+            ]
+            for topic in topics:
+                client.subscribe(topic, qos=1)
+                log.info(f"[MQTT] Subscribed to: {topic}")
+        else:
+            log.error(f"[MQTT] Connection failed with code {rc}")
+
+    def _on_disconnect(self, client, userdata, rc):
+        self._connected = False
+        log.warning(f"[MQTT] Disconnected (rc={rc})")
+
+    def _on_message(self, client, userdata, msg):
+        """معالجة الرسائل الواردة من ESP32 وRaspberry Pi."""
+        try:
+            payload = json.loads(msg.payload.decode("utf-8"))
+            topic   = msg.topic
+            log.debug(f"[MQTT] Received [{topic}]: {payload}")
+
+            # إرسال للـ handlers المسجّلة
+            if topic in self._handlers:
+                for handler in self._handlers[topic]:
+                    if self._loop and self._loop.is_running():
+                        asyncio.run_coroutine_threadsafe(
+                            handler(topic, payload), self._loop
+                        )
+        except json.JSONDecodeError:
+            log.warning(f"[MQTT] Invalid JSON on topic {msg.topic}")
+        except Exception as e:
+            log.error(f"[MQTT] Handler error: {e}")
+
+    def subscribe(self, topic: str, handler: Callable):
+        """تسجيل handler لـ topic معيّن."""
+        if topic not in self._handlers:
+            self._handlers[topic] = []
+        self._handlers[topic].append(handler)
+
+    def publish(self, topic: str, payload: dict, qos: int = 1) -> bool:
+        """نشر رسالة على topic معيّن."""
+        if not self._client or not self._connected:
+            log.warning(f"[MQTT] Not connected — cannot publish to {topic}")
+            return False
+        try:
+            result = self._client.publish(topic, json.dumps(payload), qos=qos)
+            log.debug(f"[MQTT] Published [{topic}]: {payload}")
+            return result.rc == 0
+        except Exception as e:
+            log.error(f"[MQTT] Publish error: {e}")
+            return False
+
+    # ─── Helper publish methods ────────────────────────────────────────────
+
+    def publish_cart_status(self, session_id: int, status: str, rfid: str = ""):
+        """إرسال تحديث حالة السلة إلى Raspberry Pi."""
+        self.publish(Topics.CART_STATUS, {
+            "session_id": session_id,
+            "status": status,
+            "cart_rfid": rfid,
+        })
+
+    def publish_invoice_to_esp32(self, invoice_data: dict):
+        """إرسال بيانات الفاتورة إلى ESP32 عبر MQTT."""
+        self.publish(Topics.PAYMENT_STATUS, {
+            "event": "invoice_ready",
+            **invoice_data
+        })
+
+    def publish_payment_complete(self, cart_rfid: str, payment_data: dict):
+        """إشعار اكتمال الدفع."""
+        self.publish(Topics.PAYMENT_STATUS, {
+            "event": "payment_confirmed",
+            "cart_rfid": cart_rfid,
+            **payment_data
+        })
+
+    def publish_theft_alert(self, session_id: int, alert_type: str, details: dict):
+        """إرسال تنبيه سرقة."""
+        self.publish(Topics.THEFT_ALERT, {
+            "session_id": session_id,
+            "alert_type": alert_type,
+            **details
+        })
+
+    def publish_brake_command(self, cart_rfid: str, activate: bool):
+        """التحكم بفرامل العربة."""
+        self.publish(Topics.BRAKE_CONTROL, {
+            "cart_rfid": cart_rfid,
+            "brake": "activate" if activate else "release",
+        })
+
+    @property
+    def is_connected(self) -> bool:
+        return self._connected
+
+
+# ─── Singleton Instance ───────────────────────────────────────────────────────
+mqtt_service = MQTTService()
