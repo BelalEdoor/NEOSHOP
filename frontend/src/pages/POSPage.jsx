@@ -506,9 +506,10 @@ export default function POSPage() {
   const handleClearCart = async () => {
     setCartItems([])
     if (sessionId) {
-      // بدء جلسة جديدة
+      // بدء جلسة جديدة — يجب تمرير cart_rfid دائماً
       try {
-        const { data } = await sessionApi.start()
+        const cartRfid = import.meta.env.VITE_CART_RFID || null
+        const { data } = await sessionApi.start(cartRfid)
         setSession(data)
         clearPayment()
       } catch {}

@@ -169,13 +169,28 @@ async def timing_middleware(request: Request, call_next):
     r.headers["X-Process-Time"] = f"{(time.time()-t)*1000:.1f}ms"
     return r
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.get_allowed_origins(),
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "Accept"],
-)
+# ─── CORS ──────────────────────────────────────────────────────────────────────
+# ملاحظة: في وضع التطوير (development) نسمح بكل origins لأن IP الراسبيري باي
+# أو أي جهاز فرونت اند يتغيّر باستمرار (DHCP)، فبدل تحديث ALLOWED_ORIGINS
+# بـ .env كل مرة يتغيّر الـ IP، نسمح بـ "*" مؤقتاً.
+# allow_credentials لازم يكون False مع allow_origins=["*"] لأن المعيار
+# (CORS spec) يمنع الجمع بين الاثنين، وكان هذا سبب رجوع 400 على طلبات OPTIONS.
+if settings.ENV == "production":
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.get_allowed_origins(),
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type", "Accept"],
+    )
+else:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=False,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
 # ─── API Routes ───────────────────────────────────────────────────────────────
 # Auth
