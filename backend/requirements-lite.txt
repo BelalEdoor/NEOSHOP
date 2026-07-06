@@ -1,0 +1,55 @@
+# ─── LIGHTWEIGHT requirements for testing on a laptop ─────────────────────────
+# Excludes opencv/ultralytics/torch (theft detection / YOLO) on purpose —
+# these are large downloads and not needed to test registration + the
+# recommendation engine. cv/theft_detection.py already handles their
+# absence gracefully (see the try/except around `from ultralytics import YOLO`
+# and `import cv2`), so the rest of the app runs normally without them.
+#
+# VERSIONING NOTE: the original requirements.txt pins exact old versions
+# (e.g. numpy==1.26.4, pydantic==2.7.1). Those versions predate Python 3.14
+# and have no prebuilt wheel for it, which makes pip try to compile from
+# source and fail with "metadata-generation-failed" on a machine without
+# C build tools (Visual Studio Build Tools on Windows). This file uses
+# minimum-version constraints (>=) instead of exact pins so pip picks a
+# current release with a prebuilt wheel for whatever Python you have.
+# If you're on Python 3.11-3.13, the original requirements.txt pins also
+# work fine -- this file is specifically for newer Python versions like 3.14.
+#
+# If you later want the full system including theft detection, use the
+# original backend/requirements.txt instead of this file.
+
+# --- Web Framework ---
+fastapi>=0.111.0
+uvicorn[standard]>=0.29.0
+python-multipart>=0.0.9
+
+# --- Database ---
+sqlalchemy>=2.0.30
+pymysql>=1.1.1
+alembic>=1.13.1
+
+# --- Auth & Security ---
+python-jose[cryptography]>=3.3.0
+passlib>=1.7.4
+# bcrypt IS intentionally pinned exactly, unlike everything else above.
+# passlib 1.7.4 reads bcrypt.__about__.__version__, which bcrypt>=4.1
+# removed -- this breaks password hashing with a misleading "password
+# cannot be longer than 72 bytes" error, unrelated to Python version
+# support. 4.0.1 is the newest version that still has __about__.
+bcrypt==4.0.1
+pydantic[email]>=2.7.1
+python-dotenv>=1.0.1
+pydantic-settings>=2.2.1
+
+# --- MQTT ---
+# Lightweight, pure-Python -- kept so mqtt/client.py imports successfully.
+# It will simply fail to connect (and log a warning) if no broker is running,
+# which is fine for this lightweight test setup.
+paho-mqtt>=1.6.1
+
+# --- Async ---
+httpx>=0.27.0
+websockets>=12.0
+
+# --- Utils ---
+numpy

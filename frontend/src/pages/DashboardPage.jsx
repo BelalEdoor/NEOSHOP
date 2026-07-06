@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import toast from 'react-hot-toast'
 import { productApi, cartApi, analysisApi } from '../hooks/useApi'
 import { useAuthStore } from '../store'
+import { formatPrice } from '../utils/format'
 import AllergenModal from '../components/cart/AllergenModal'
 import BarcodeScanner from '../components/pos/BarcodeScanner'
 import AIAnalysisModal from '../components/pos/AIAnalysisModal'
@@ -180,7 +181,7 @@ export default function DashboardPage() {
                       <p style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {isAr ? (item.product?.name_ar || item.product?.name) : item.product?.name}
                       </p>
-                      <p style={{ fontSize: 10, color: 'var(--text3)', margin: 0 }}>${(item.product?.price || 0).toFixed(2)}</p>
+                      <p style={{ fontSize: 10, color: 'var(--text3)', margin: 0 }}>{formatPrice(item.product?.price || 0)}</p>
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
                       <button onClick={() => handleUpdateQty(item, -1)} style={{ width: 20, height: 20, borderRadius: 5, border: '1px solid var(--border)', background: 'var(--surface)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -203,7 +204,7 @@ export default function DashboardPage() {
           {cartItems.length > 0 && (
             <div style={{ padding: '10px 14px', borderTop: '1px solid var(--border)', flexShrink: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text2)' }}>{t('total')}</span>
-              <span style={{ fontSize: 19, fontWeight: 900, color: 'var(--primary)' }}>${cartTotal.toFixed(2)}</span>
+              <span style={{ fontSize: 19, fontWeight: 900, color: 'var(--primary)' }}>{formatPrice(cartTotal)}</span>
             </div>
           )}
         </div>
@@ -237,7 +238,7 @@ function ProductCard({ product, onAdd, isAr, t }) {
         {isAr ? (product.name_ar || product.name) : product.name}
       </h3>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 'auto' }}>
-        <span style={{ fontSize: 16, fontWeight: 900, color: 'var(--primary)' }}>${product.price.toFixed(2)}</span>
+        <span style={{ fontSize: 16, fontWeight: 900, color: 'var(--primary)' }}>{formatPrice(product.price)}</span>
         <button onClick={handleAdd} disabled={adding}
           style={{ display: 'flex', alignItems: 'center', gap: 3, padding: '5px 10px', borderRadius: 9, border: 'none', background: 'var(--primary)', color: '#fff', fontWeight: 700, fontSize: 11, cursor: 'pointer', opacity: adding ? 0.6 : 1 }}>
           {adding ? <Loader2 style={{ width: 11, height: 11, animation: 'spin 1s linear infinite' }} /> : <Plus style={{ width: 11, height: 11 }} />}

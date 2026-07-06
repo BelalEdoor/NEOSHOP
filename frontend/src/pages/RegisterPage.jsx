@@ -40,7 +40,7 @@ export default function RegisterPage() {
       })
       setAuth(data.user, data.access_token)
       toast.success(`✅ ${t('welcomeBack')} ${data.user.name}!`)
-      navigate('/')
+      navigate('/onboarding')
     } catch (err) {
       const msg = err.response?.data?.detail || t('login')
       toast.error(msg)

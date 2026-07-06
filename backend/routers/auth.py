@@ -37,6 +37,9 @@ def _to_user_out(user: User) -> UserOut:
         gender=user.gender,
         is_active=user.is_active,
         created_at=user.created_at,
+        recommendations_enabled=user.recommendations_enabled,
+        onboarding_completed=user.onboarding_completed,
+        other_health_notes=user.other_health_notes,
     )
 
 

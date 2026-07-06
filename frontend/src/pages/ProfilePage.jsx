@@ -15,6 +15,7 @@ export default function ProfilePage() {
     name: user?.name || '',
     email: user?.email || '',
     allergies: user?.allergies || [],
+    recommendations_enabled: user?.recommendations_enabled ?? true,
   })
   const [allergyInput, setAllergyInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -37,7 +38,10 @@ export default function ProfilePage() {
     setLoading(true)
     setSaved(false)
     try {
-      const { data } = await userApi.updateMe({ name: form.name, email: form.email, allergies: form.allergies })
+      const { data } = await userApi.updateMe({
+        name: form.name, email: form.email, allergies: form.allergies,
+        recommendations_enabled: form.recommendations_enabled,
+      })
       setUser(data)
       setSaved(true)
       toast.success(t('profileUpdated') || 'Profile updated!')
@@ -152,6 +156,44 @@ export default function ProfilePage() {
           {loading && <Loader2 className="w-4 h-4 animate-spin" />}
           {saved && <CheckCircle className="w-4 h-4" />}
           {t('saveChanges')}
+        </button>
+      </div>
+
+      {/* Recommendations toggle */}
+      <div className="card flex items-start justify-between gap-4">
+        <div>
+          <h2 className="font-bold text-lg flex items-center gap-2" style={{ color: 'var(--text)' }}>
+            <Shield className="w-5 h-5 text-orange-500" />
+            {t('recommendationsToggleLabel')}
+          </h2>
+          <p className="text-sm mt-1" style={{ color: 'var(--text2)' }}>
+            {t('recommendationsToggleHelp')}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={async () => {
+            const next = !form.recommendations_enabled
+            setForm({ ...form, recommendations_enabled: next })
+            try {
+              const { data } = await userApi.updateMe({ recommendations_enabled: next })
+              setUser(data)
+              toast.success(
+                next
+                  ? (t('recommendationsToggleLabel') + ' ✅')
+                  : (t('recommendationsToggleLabel') + ' ⏸️')
+              )
+            } catch (err) {
+              setForm({ ...form, recommendations_enabled: !next }) // revert on failure
+              toast.error(err.response?.data?.detail || 'Update failed')
+            }
+          }}
+          className="relative shrink-0 w-12 h-7 rounded-full transition-colors"
+          style={{ background: form.recommendations_enabled ? 'var(--primary)' : 'var(--border)' }}>
+          <span
+            className="absolute top-0.5 w-6 h-6 rounded-full bg-white transition-transform"
+            style={{ transform: form.recommendations_enabled ? 'translateX(1.375rem)' : 'translateX(0.125rem)' }}
+          />
         </button>
       </div>
     </div>

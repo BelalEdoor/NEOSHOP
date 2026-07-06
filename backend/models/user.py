@@ -31,6 +31,17 @@ class User(Base):
     age       = Column(Integer, nullable=True)
     gender    = Column(String(10), nullable=True)
     allergies = Column(Text, nullable=True)  # JSON: ["milk","nuts"]
+    other_health_notes = Column(Text, nullable=True)  # free-text personal note, never matched automatically
+
+    # ─── Recommendation Engine Preferences (added) ─────────────────────────
+    # recommendations_enabled: customer's own opt-in/out for the allergen/
+    # health-condition check while scanning. Defaults to True (encouraged,
+    # not forced) -- matches the decision that onboarding is skippable.
+    recommendations_enabled = Column(Boolean, default=True, nullable=False)
+    # onboarding_completed: tracks whether the post-registration allergy/
+    # health-condition step has been shown, so it's only shown once and
+    # can be safely skipped without reappearing every login.
+    onboarding_completed = Column(Boolean, default=False, nullable=False)
 
     # ─── Owner / Security Extra Info ──────────────────────────────────────
     business_name   = Column(String(200), nullable=True)

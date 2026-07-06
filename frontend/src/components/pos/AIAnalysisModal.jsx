@@ -5,6 +5,7 @@ import {
   X, MapPin, ShoppingCart, AlertTriangle, CheckCircle,
   Brain, Loader2, Sparkles, Package
 } from 'lucide-react'
+import { formatPrice } from '../../utils/format'
 
 export default function AIAnalysisModal({
   product,
@@ -140,7 +141,7 @@ export default function AIAnalysisModal({
                 )}
                 <div className="flex justify-between text-sm py-2">
                   <span style={{ color: 'var(--text2)' }}>السعر</span>
-                  <span className="font-extrabold text-base" style={{ color: '#22c55e' }}>${product.price?.toFixed(2)}</span>
+                  <span className="font-extrabold text-base" style={{ color: '#22c55e' }}>{formatPrice(product.price)}</span>
                 </div>
               </div>
 
@@ -188,7 +189,7 @@ export default function AIAnalysisModal({
                     <div>
                       <p className="font-bold text-sm" style={{ color: 'var(--text)' }}>{s.name}</p>
                       {s.name_ar && <p className="text-xs" style={{ color: 'var(--text3)' }}>{s.name_ar}</p>}
-                      <p className="text-xs font-semibold" style={{ color: '#22c55e' }}>${s.price?.toFixed(2)}</p>
+                      <p className="text-xs font-semibold" style={{ color: '#22c55e' }}>{formatPrice(s.price)}</p>
                     </div>
                     <button
                       onClick={() => onAddAlternative(s)}

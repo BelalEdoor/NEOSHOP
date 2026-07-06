@@ -1,0 +1,5 @@
+# raspberry_pi/requirements.txt
+# ثبّت على الراسباري باي:  pip3 install -r requirements.txt
+opencv-contrib-python>=4.8
+numpy
+requests

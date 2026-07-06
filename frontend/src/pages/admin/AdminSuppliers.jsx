@@ -56,7 +56,7 @@ export default function AdminSuppliers() {
       <div className="rounded-2xl p-4 flex items-center gap-4" style={{ background: 'linear-gradient(135deg,#1e40af,#312e81)', color:'white' }}>
         <div className="w-12 h-12 rounded-2xl bg-white/20 flex items-center justify-center"><DollarSign className="w-6 h-6" /></div>
         <div>
-          <p className="text-2xl font-extrabold">${suppliers.reduce((a,s)=>a+s.balance,0).toLocaleString()}</p>
+          <p className="text-2xl font-extrabold">₪{suppliers.reduce((a,s)=>a+s.balance,0).toLocaleString()}</p>
           <p className="text-white/70 text-sm">{t('totalSupplied')}</p>
         </div>
       </div>
@@ -98,7 +98,7 @@ export default function AdminSuppliers() {
                 </div>
                 <div className="flex justify-between text-xs">
                   <span style={{ color: 'var(--text3)' }}>{t('revenue')}</span>
-                  <span className="font-extrabold" style={{ color: 'var(--primary)' }}>${s.balance.toLocaleString()}</span>
+                  <span className="font-extrabold" style={{ color: 'var(--primary)' }}>₪{s.balance.toLocaleString()}</span>
                 </div>
               </div>
               <div className="flex gap-2">

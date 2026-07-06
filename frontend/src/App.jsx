@@ -4,6 +4,7 @@ import { Toaster } from 'react-hot-toast'
 import { useAuthStore, useThemeStore, ADMIN_EMAILS } from './store'
 import LoginPage from './pages/LoginPage'
 import RegisterPage from './pages/RegisterPage'
+import OnboardingPage from './pages/OnboardingPage'
 import POSPage from './pages/POSPage'
 import AIModelPage from './pages/AIModelPage'
 import ProfilePage from './pages/ProfilePage'
@@ -43,6 +44,7 @@ export default function App() {
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
+        <Route path="/onboarding" element={<RequireAuth><OnboardingPage /></RequireAuth>} />
 
         {/* Main POS Layout */}
         <Route

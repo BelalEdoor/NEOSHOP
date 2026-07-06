@@ -1,0 +1,40 @@
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Virtual Environments
+venv/
+.venv/
+env/
+backend/venv/
+frontend/venv/
+
+# Node
+node_modules/
+frontend/node_modules/
+
+# Environment files
+.env
+backend/.env
+frontend/.env
+
+# Database
+*.db
+*.sqlite3
+
+# Logs
+*.log
+
+# Build
+dist/
+build/
+
+# Zip files
+*.zip
+
+# IDE
+.vscode/
+.idea/

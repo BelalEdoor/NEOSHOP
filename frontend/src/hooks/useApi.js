@@ -65,6 +65,7 @@ export const userApi = {
 // ─── Products ─────────────────────────────────────────────────────────────────
 export const productApi = {
   list:      (params) => api.get('/products/', { params }),
+  offers:    ()        => api.get('/products/offers'),
   get:       (id)     => api.get(`/products/${id}`),
   byBarcode: (barcode) => api.get(`/products/barcode/${barcode}`),
   create:    (data)   => api.post('/products/', data),
@@ -123,6 +124,17 @@ export const paymentApi = {
   getStatus:    (sessionId) => api.get(`/payments/status/${sessionId}`),
   getPayments:  (sessionId) => api.get(`/payments/session/${sessionId}`),
   cancel:       (paymentId) => api.post(`/payments/cancel/${paymentId}`),
+}
+
+// ─── Allergens & Health Conditions (for onboarding / profile) ───────────────
+export const allergensApi = {
+  list: () => api.get('/analysis/allergens'),
+}
+export const healthConditionsApi = {
+  list: () => api.get('/analysis/health-conditions'),
+}
+export const onboardingApi = {
+  submit: (data) => api.post('/analysis/onboarding', data),
 }
 
 // ─── Analysis (AI) ────────────────────────────────────────────────────────────

@@ -12,6 +12,13 @@ from models.invoice import Invoice
 from models.payment import Payment, PaymentTransaction
 from models.theft import TheftLog
 
+# ─── Recommendation Engine (new) ────────────────────────────────────────────
+from models.recommendation_engine import (
+    Allergen, CustomerAllergy, ProductAllergen,
+    HealthCondition, CustomerHealthCondition,
+    RecommendationLog,
+)
+
 __all__ = [
     "User", "Product",
     "Cart", "CartItem",
@@ -19,4 +26,7 @@ __all__ = [
     "Invoice",
     "Payment", "PaymentTransaction",
     "TheftLog",
+    "Allergen", "CustomerAllergy", "ProductAllergen",
+    "HealthCondition", "CustomerHealthCondition",
+    "RecommendationLog",
 ]

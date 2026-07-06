@@ -69,6 +69,9 @@ class UserOut(BaseModel):
     gender:     Optional[str]       = None
     is_active:  bool                = True
     created_at: Optional[datetime]  = None
+    recommendations_enabled: bool   = True
+    onboarding_completed:    bool   = False
+    other_health_notes: Optional[str] = None
     class Config:
         from_attributes = True
 
@@ -78,6 +81,10 @@ class UserUpdate(BaseModel):
     allergies: Optional[List[str]] = None
     age:       Optional[int]       = None
     gender:    Optional[str]       = None
+    recommendations_enabled: Optional[bool] = None
+    onboarding_completed:    Optional[bool] = None
+    other_health_notes: Optional[str] = None
+
 
 
 # ─── Product ───────────────────────────────────────────────────────────────────
@@ -97,6 +104,9 @@ class ProductOut(BaseModel):
     location_x:  int                 = 0
     location_y:  int                 = 0
     section:     Optional[str]       = None
+    is_on_offer:    bool             = False
+    old_price:      Optional[float]  = None
+    offer_expires_at: Optional[datetime] = None
     class Config:
         from_attributes = True
 
@@ -113,6 +123,9 @@ class ProductCreate(BaseModel):
     allergens:   Optional[List[str]] = []
     image_url:   Optional[str]       = None
     section:     Optional[str]       = None
+    is_on_offer:    bool             = False
+    old_price:      Optional[float]  = None
+    offer_expires_at: Optional[datetime] = None
 
 class ProductUpdate(BaseModel):
     name:        Optional[str]       = None
@@ -127,6 +140,9 @@ class ProductUpdate(BaseModel):
     allergens:   Optional[List[str]] = None
     image_url:   Optional[str]       = None
     section:     Optional[str]       = None
+    is_on_offer:    Optional[bool]   = None
+    old_price:      Optional[float]  = None
+    offer_expires_at: Optional[datetime] = None
 
 
 # ─── Cart ──────────────────────────────────────────────────────────────────────
@@ -266,6 +282,18 @@ class BarcodeScanlResult(BaseModel):
     matched_allergens: List[str]
     warning_message:   Optional[str]       = None
     suggestions:       List[ProductOut]    = []
+
+class HealthConditionSelection(BaseModel):
+    condition_id: int
+    severity:     str = "moderate"  # 'mild' | 'moderate' | 'severe'
+
+class OnboardingRequest(BaseModel):
+    """What the onboarding page submits: checked allergy names (matching the
+    same string format User.allergies already uses) and selected health
+    condition IDs with severity, plus an optional free-text note."""
+    allergies:        List[str] = []
+    health_conditions: List[HealthConditionSelection] = []
+    other_notes:      Optional[str] = None
 
 
 # ─── WebSocket Messages ────────────────────────────────────────────────────────

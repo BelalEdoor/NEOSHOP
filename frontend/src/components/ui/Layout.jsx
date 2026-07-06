@@ -22,11 +22,13 @@ export default function Layout() {
 
   return (
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', overflow: 'hidden', background: 'var(--bg)' }}>
-      {/* Navbar — fixed height, never moves */}
-      <nav style={{ background: 'var(--surface)', borderBottom: '1px solid var(--border)', flexShrink: 0, zIndex: 40 }}>
+      {/* Navbar — deep teal brand bar */}
+      <nav style={{ background: 'var(--primary)', borderBottom: 'none', flexShrink: 0, zIndex: 40 }}>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between" style={{ height: 56 }}>
-          <NavLink to="/" className="flex items-center gap-2 font-extrabold text-lg" style={{ color: 'var(--primary)' }}>
-            <ShoppingBag className="w-5 h-5" />
+          <NavLink to="/" className="flex items-center gap-2 font-extrabold text-lg" style={{ color: '#fff' }}>
+            <div style={{ width: 32, height: 32, background: 'var(--accent)', borderRadius: 9, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <ShoppingBag className="w-4 h-4" style={{ color: 'var(--primary)' }} />
+            </div>
             NEOSHOP
           </NavLink>
 
@@ -54,7 +56,7 @@ export default function Layout() {
 
             {isAdmin && (
               <NavLink to="/admin" className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ms-1"
-                style={{ background: 'linear-gradient(135deg,#1e40af,#312e81)', color: '#fff', boxShadow: '0 2px 8px rgba(30,64,175,0.35)' }}>
+                style={{ background: 'var(--accent)', color: 'var(--primary)', boxShadow: '0 2px 8px rgba(15,212,160,0.35)' }}>
                 <Shield className="w-3.5 h-3.5" />
                 <span className="hidden sm:inline">{t('admin')}</span>
               </NavLink>
@@ -69,18 +71,21 @@ export default function Layout() {
               <span className="hidden sm:inline text-xs">{t('language')}</span>
             </button>
 
-            <div className="flex items-center gap-2 ms-1 ps-2" style={{ borderInlineStart: '1px solid var(--border)' }}>
-              <span className="text-xs hidden md:block" style={{ color: 'var(--text2)' }}>{user?.name}</span>
+            <div className="flex items-center gap-2 ms-1 ps-2" style={{ borderInlineStart: '1px solid rgba(15,212,160,0.25)' }}>
+              <span className="text-xs hidden md:block" style={{ color: 'rgba(255,255,255,0.6)' }}>{user?.name}</span>
               <button onClick={handleLogout} className="nav-link !px-2" title={t('logout')}>
-                <LogOut className="w-4 h-4 text-red-400" />
+                <LogOut className="w-4 h-4" style={{ color: 'rgba(255,255,255,0.5)' }} />
               </button>
             </div>
           </div>
         </div>
       </nav>
 
-      {/* Page content — fills remaining height, pages control their own scroll */}
-      <main className="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8" style={{ overflow: 'hidden', minHeight: 0 }}>
+      {/* Page content — fills remaining height; scrolls internally when content
+          is taller than the viewport. Previously this was overflow:hidden,
+          which silently clipped any page taller than the screen (Profile,
+          AI scanner results, etc.) instead of letting the user scroll to it. */}
+      <main className="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8" style={{ overflowY: 'auto', minHeight: 0 }}>
         <Outlet />
       </main>
     </div>

@@ -24,6 +24,9 @@ def _to_out(user: User) -> UserOut:
         role=user.role.value if hasattr(user.role, 'value') else str(user.role),
         allergies=allergies, age=user.age, gender=user.gender,
         is_active=user.is_active, created_at=user.created_at,
+        recommendations_enabled=user.recommendations_enabled,
+        onboarding_completed=user.onboarding_completed,
+        other_health_notes=user.other_health_notes,
     )
 
 

@@ -6,11 +6,12 @@ export default {
     extend: {
       colors: {
         primary: {
-          50:  '#eff6ff',
-          100: '#dbeafe',
-          500: '#3b82f6',
-          600: '#2563eb',
-          700: '#1d4ed8',
+          50:  '#e6faf5',
+          100: '#d0f0e8',
+          400: '#0fd4a0',
+          500: '#0b9e82',
+          600: '#0b6e5c',
+          700: '#084f41',
         },
       },
       fontFamily: {

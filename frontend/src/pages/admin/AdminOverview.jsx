@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { productApi } from '../../hooks/useApi'
 import api from '../../hooks/useApi'
+import { formatPrice } from '../../utils/format'
 import {
   TrendingUp, Package, AlertTriangle, FileText,
   DollarSign, ArrowUpRight, Inbox, RefreshCw,
@@ -114,7 +115,7 @@ export default function AdminOverview() {
 
       {/* Stats */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 14 }}>
-        <StatCard icon={DollarSign}  label={isAr ? 'إيرادات مكتملة' : 'Completed Revenue'} value={`$${totalRevenue.toFixed(2)}`}   sub={`${completedInvoices.length} ${isAr ? 'فاتورة مكتملة' : 'completed invoices'}`} color="#2563eb" />
+        <StatCard icon={DollarSign}  label={isAr ? 'إيرادات مكتملة' : 'Completed Revenue'} value={formatPrice(totalRevenue)}   sub={`${completedInvoices.length} ${isAr ? 'فاتورة مكتملة' : 'completed invoices'}`} color="#2563eb" />
         <StatCard icon={FileText}    label={isAr ? 'فواتير قيد الانتظار' : 'Pending Invoices'} value={pendingInvoices.length}       sub={isAr ? 'تحتاج مراجعة' : 'Need review'} color="#d97706" />
         <StatCard icon={Package}     label={isAr ? 'إجمالي المنتجات' : 'Total Products'}     value={loading ? '…' : products.length} sub={isAr ? 'في قاعدة البيانات' : 'In database'} color="#10b981" />
         <StatCard icon={AlertTriangle} label={isAr ? 'مخزون منخفض' : 'Low Stock'}           value={loading ? '…' : lowStock.length} sub={isAr ? 'أقل من 10 قطع' : 'Below 10 units'} color="#ef4444" />
@@ -144,7 +145,7 @@ export default function AdminOverview() {
                 <p style={{ fontSize: 11, color: 'var(--text3)', margin: '1px 0 0' }}>{inv.cashier} · {inv.date}</p>
               </div>
               <div style={{ textAlign: 'end', flexShrink: 0 }}>
-                <p style={{ fontWeight: 800, fontSize: 14, color: 'var(--primary)', margin: 0 }}>${(inv.total || 0).toFixed(2)}</p>
+                <p style={{ fontWeight: 800, fontSize: 14, color: 'var(--primary)', margin: 0 }}>{formatPrice(inv.total || 0)}</p>
                 <span style={{ padding: '2px 7px', borderRadius: 8, fontSize: 10, fontWeight: 700, background: s.bg, color: s.color }}>{s.label}</span>
               </div>
             </div>

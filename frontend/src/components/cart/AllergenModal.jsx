@@ -2,6 +2,7 @@ import React from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import { AlertTriangle, CheckCircle, MapPin, X, ArrowRight } from 'lucide-react'
+import { formatPrice } from '../../utils/format'
 
 export default function AllergenModal({ result, product, onClose, onContinue }) {
   const { t } = useTranslation()
@@ -69,7 +70,7 @@ export default function AllergenModal({ result, product, onClose, onContinue }) 
                   <div key={s.id} className="flex items-center justify-between p-3 rounded-xl bg-green-50 border border-green-100">
                     <div>
                       <p className="text-sm font-semibold text-gray-800">{s.name}</p>
-                      <p className="text-xs text-gray-500">{s.brand} · ${s.price.toFixed(2)}</p>
+                      <p className="text-xs text-gray-500">{s.brand} · {formatPrice(s.price)}</p>
                     </div>
                     <span className="text-xs bg-green-200 text-green-800 px-2 py-0.5 rounded-full">Safe</span>
                   </div>

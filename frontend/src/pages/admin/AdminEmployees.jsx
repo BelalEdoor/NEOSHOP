@@ -67,7 +67,7 @@ export default function AdminEmployees() {
           <p className="text-xs font-semibold mt-1" style={{ color: 'var(--text3)' }}>{t('onLeave')}</p>
         </div>
         <div className="rounded-2xl p-4 text-center" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
-          <p className="text-xl font-extrabold text-emerald-500">${totalSalary.toLocaleString()}</p>
+          <p className="text-xl font-extrabold text-emerald-500">₪{totalSalary.toLocaleString()}</p>
           <p className="text-xs font-semibold mt-1" style={{ color: 'var(--text3)' }}>{t('totalPayroll')}</p>
         </div>
       </div>
@@ -99,7 +99,7 @@ export default function AdminEmployees() {
               <div className="space-y-1.5 mb-3">
                 <div className="flex justify-between text-xs">
                   <span style={{ color: 'var(--text3)' }}>{t('salary')}</span>
-                  <span className="font-bold" style={{ color: 'var(--primary)' }}>${emp.salary.toLocaleString()}</span>
+                  <span className="font-bold" style={{ color: 'var(--primary)' }}>₪{emp.salary.toLocaleString()}</span>
                 </div>
                 <div className="flex justify-between text-xs">
                   <span style={{ color: 'var(--text3)' }}>{t('vacationDays')}</span>

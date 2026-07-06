@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ShieldAlert, CheckCircle, Unlock, Lock, Wifi, WifiOff, Bell, Trash2, Eye } from 'lucide-react'
+import { formatPrice } from '../../utils/format'
 
 const WS_URL = `ws://localhost:8000/ws/admin`
 
@@ -324,7 +325,7 @@ export default function AdminSecurity() {
               )}
               <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8, paddingTop: 6, borderTop: '1px solid var(--border)' }}>
                 <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text2)' }}>Total</span>
-                <span style={{ fontSize: 14, fontWeight: 900, color: 'var(--primary)' }}>${(cartState.total || 0).toFixed(2)}</span>
+                <span style={{ fontSize: 14, fontWeight: 900, color: 'var(--primary)' }}>{formatPrice(cartState.total || 0)}</span>
               </div>
             </div>
           )}

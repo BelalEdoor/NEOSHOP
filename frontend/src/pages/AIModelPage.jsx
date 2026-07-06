@@ -9,6 +9,7 @@ import {
   AlertTriangle, CheckCircle, Package, Sparkles, Zap, Barcode
 } from 'lucide-react'
 import { cartApi } from '../hooks/useApi'
+import { formatPrice } from '../utils/format'
 
 const AI_BACKEND_URL = '' // Use Vite proxy: /analyze → http://localhost:8000
 
@@ -159,7 +160,7 @@ export default function AIModelPage() {
                   )}
                 </div>
               </div>
-              <p className="text-2xl font-extrabold" style={{ color: '#22c55e' }}>${result.product.price?.toFixed(2)}</p>
+              <p className="text-2xl font-extrabold" style={{ color: '#22c55e' }}>{formatPrice(result.product.price)}</p>
             </div>
 
             {/* Safety Status */}
@@ -248,7 +249,7 @@ export default function AIModelPage() {
                   <div key={s.id} className="flex items-center justify-between p-3 rounded-xl" style={{ background: 'var(--surface2)' }}>
                     <div>
                       <p className="text-sm font-bold" style={{ color: 'var(--text)' }}>{s.name}</p>
-                      <p className="text-xs" style={{ color: 'var(--text3)' }}>${s.price?.toFixed(2)}</p>
+                      <p className="text-xs" style={{ color: 'var(--text3)' }}>{formatPrice(s.price)}</p>
                     </div>
                     <button
                       onClick={() => handleAddToCart(s)}

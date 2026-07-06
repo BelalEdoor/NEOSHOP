@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useLocation } from 'react-router-dom'
 import { productApi } from '../hooks/useApi'
+import { formatPrice } from '../utils/format'
 import { MapPin, Loader2, Search, X, Package, Store, Navigation } from 'lucide-react'
 
 const SECTIONS = {
@@ -309,7 +310,7 @@ export default function MapPage() {
                       border: `1.5px solid ${selectedProduct?.id === p.id ? activeSection.stroke : activeSection.stroke + '30'}`,
                     }}>
                     <span className="truncate font-semibold">{p.name_ar || p.name}</span>
-                    <span className="shrink-0 font-extrabold">${p.price?.toFixed(2)}</span>
+                    <span className="shrink-0 font-extrabold">{formatPrice(p.price)}</span>
                   </button>
                 ))}
               </div>

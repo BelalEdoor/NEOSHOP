@@ -15,6 +15,17 @@ from schemas import ProductOut, ProductCreate, ProductUpdate
 router = APIRouter()
 
 
+def _naive(dt):
+    """
+    Strips timezone info if present. SQLite stores DateTime(timezone=True)
+    values without tzinfo regardless of the column declaration, while MySQL
+    can return them either way depending on driver/config -- comparing a
+    naive and an aware datetime raises TypeError, so every comparison in
+    this file goes through this helper to normalize both sides first.
+    """
+    return dt.replace(tzinfo=None) if dt and dt.tzinfo else dt
+
+
 def _serialize(product: Product) -> ProductOut:
     def split(s):
         if not s:
@@ -41,6 +52,9 @@ def _serialize(product: Product) -> ProductOut:
         location_x=product.location_x or 0,
         location_y=product.location_y or 0,
         section=product.section,
+        is_on_offer=product.is_on_offer or False,
+        old_price=product.old_price,
+        offer_expires_at=product.offer_expires_at,
     )
 
 
@@ -59,6 +73,25 @@ def list_products(
     if category:
         q = q.filter(Product.category == category)
     return [_serialize(p) for p in q.offset(skip).limit(limit).all()]
+
+
+@router.get("/offers", response_model=List[ProductOut])
+def list_offers(db: Session = Depends(get_db)):
+    """
+    Real offers, replacing the previous hardcoded mock list in
+    frontend/src/data/offersData.js. An offer is any product the store
+    owner has flagged is_on_offer=True via the admin panel, and whose
+    offer_expires_at is either unset or still in the future.
+    """
+    from datetime import datetime
+    now = datetime.utcnow()
+    q = db.query(Product).filter(Product.is_on_offer == True)
+    products = q.all()
+    active = [
+        p for p in products
+        if p.offer_expires_at is None or _naive(p.offer_expires_at) > now
+    ]
+    return [_serialize(p) for p in active]
 
 
 @router.get("/barcode/{barcode}", response_model=ProductOut)
@@ -97,6 +130,8 @@ def create_product(
         ingredients=json.dumps(req.ingredients or []),
         allergens=json.dumps(req.allergens or []),
         image_url=req.image_url, section=req.section,
+        is_on_offer=req.is_on_offer, old_price=req.old_price,
+        offer_expires_at=req.offer_expires_at,
     )
     db.add(p)
     db.commit()

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { invoiceApi } from '../../hooks/useApi'
+import { formatPrice } from '../../utils/format'
 import toast from 'react-hot-toast'
 import {
   Search, FileText, Trash2, Eye, RefreshCw,
@@ -58,8 +59,8 @@ function InvoiceModal({ inv, onClose, onDelete, isAr }) {
           {[
             { label: isAr?'رقم الجلسة':'Session ID',  value: inv.session_id || '—' },
             { label: isAr?'RFID العربة':'Cart RFID',   value: inv.cart_rfid  || '—', mono: true },
-            { label: isAr?'المجموع الفرعي':'Subtotal', value: `$${(inv.subtotal||0).toFixed(2)}` },
-            { label: isAr?'الخصم':'Discount',          value: `$${(inv.discount||0).toFixed(2)}` },
+            { label: isAr?'المجموع الفرعي':'Subtotal', value: formatPrice(inv.subtotal||0) },
+            { label: isAr?'الخصم':'Discount',          value: formatPrice(inv.discount||0) },
             { label: isAr?'تاريخ الإنشاء':'Created',   value: inv.created_at ? new Date(inv.created_at).toLocaleString() : '—' },
             { label: isAr?'تاريخ الدفع':'Paid At',     value: inv.paid_at    ? new Date(inv.paid_at).toLocaleString()    : '—' },
           ].map((r,i) => (
@@ -73,7 +74,7 @@ function InvoiceModal({ inv, onClose, onDelete, isAr }) {
         {/* Total */}
         <div style={{ display:'flex',justifyContent:'space-between',alignItems:'center',padding:'12px 22px',background:'var(--surface2)',borderBottom:'1px solid var(--border)',flexShrink:0 }}>
           <span style={{ fontWeight:700,color:'var(--text2)' }}>{isAr?'المجموع الكلي':'Total Amount'}</span>
-          <span style={{ fontSize:26,fontWeight:900,color:'#16a34a' }}>${(inv.total_amount||0).toFixed(2)}</span>
+          <span style={{ fontSize:26,fontWeight:900,color:'#16a34a' }}>{formatPrice(inv.total_amount||0)}</span>
         </div>
 
         {/* Items */}
@@ -88,10 +89,10 @@ function InvoiceModal({ inv, onClose, onDelete, isAr }) {
               <div>
                 <p style={{ fontWeight:700,color:'var(--text)',margin:0 }}>{item.product_name || item.name}</p>
                 <p style={{ fontSize:11,color:'var(--text3)',margin:'2px 0 0' }}>
-                  ${(item.unit_price||0).toFixed(2)} × {item.quantity}
+                  {formatPrice(item.unit_price||0)} × {item.quantity}
                 </p>
               </div>
-              <span style={{ fontWeight:800,color:'var(--primary)' }}>${(item.subtotal||0).toFixed(2)}</span>
+              <span style={{ fontWeight:800,color:'var(--primary)' }}>{formatPrice(item.subtotal||0)}</span>
             </div>
           ))}
         </div>
@@ -186,7 +187,7 @@ export default function AdminInvoices() {
           { label:isAr?'الكل':'Total',      value: invoices.length,                                  color:'#2563eb' },
           { label:isAr?'انتظار':'Pending',  value: invoices.filter(i=>['CREATED','SENT','PROCESSING'].includes(i.status)).length, color:'#d97706' },
           { label:isAr?'مدفوعة':'Paid',     value: invoices.filter(i=>i.status==='PAID').length,     color:'#16a34a' },
-          { label:isAr?'الإيرادات':'Revenue',value:`$${invoices.filter(i=>i.status==='PAID').reduce((a,i)=>a+(i.total_amount||0),0).toFixed(2)}`, color:'#7c3aed' },
+          { label:isAr?'الإيرادات':'Revenue',value:formatPrice(invoices.filter(i=>i.status==='PAID').reduce((a,i)=>a+(i.total_amount||0),0)), color:'#7c3aed' },
         ].map((s,i) => (
           <div key={i} style={{ borderRadius:14,padding:'12px 14px',textAlign:'center',background:'var(--surface)',border:'1px solid var(--border)' }}>
             <p style={{ fontSize:20,fontWeight:900,color:s.color,margin:0 }}>{s.value}</p>
@@ -271,7 +272,7 @@ export default function AdminInvoices() {
                 </code>
 
                 <span style={{ fontWeight:900,fontSize:14,color:'#16a34a' }}>
-                  ${(inv.total_amount||0).toFixed(2)}
+                  {formatPrice(inv.total_amount||0)}
                 </span>
 
                 <span style={{ display:'inline-flex',alignItems:'center',gap:4,padding:'3px 8px',borderRadius:20,background:s.bg,color:s.color,fontSize:10,fontWeight:700,whiteSpace:'nowrap' }}>

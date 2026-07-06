@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { productApi } from '../../hooks/useApi'
+import { formatPrice } from '../../utils/format'
 import toast from 'react-hot-toast'
 import { Plus, Pencil, Trash2, X, Search, AlertTriangle, Check } from 'lucide-react'
 
-const EMPTY = { name: '', name_ar: '', category: 'Dairy', price: '', stock: '', barcode: '', section: 'A1' }
+const EMPTY = { name: '', name_ar: '', category: 'Dairy', price: '', stock: '', barcode: '', section: 'A1', is_on_offer: false, old_price: '', offer_expires_at: '' }
 const CATEGORIES = ['Dairy','Bakery','Snacks','Beverages','Produce','Meat','Pantry']
 const SECTIONS = ['A1','A2','B1','B2','C1','C2','D1','D2','E1','F1']
 
@@ -34,7 +35,16 @@ export default function AdminProducts() {
   )
 
   const openAdd = () => { setForm(EMPTY); setModal('add'); setEditId(null) }
-  const openEdit = (p) => { setForm({ ...p, price: String(p.price ?? ''), stock: String(p.quantity ?? p.stock ?? 0) }); setEditId(p.id); setModal('edit') }
+  const openEdit = (p) => {
+    setForm({
+      ...p,
+      price: String(p.price ?? ''),
+      stock: String(p.quantity ?? p.stock ?? 0),
+      old_price: p.old_price != null ? String(p.old_price) : '',
+      offer_expires_at: p.offer_expires_at ? p.offer_expires_at.slice(0, 16) : '', // ISO -> datetime-local input format
+    })
+    setEditId(p.id); setModal('edit')
+  }
 
   const handleSave = async () => {
     if (!form.name.trim()) return
@@ -46,6 +56,9 @@ export default function AdminProducts() {
       quantity: parseInt(form.stock) || 0,
       category: form.category,
       section: form.section || null,
+      is_on_offer: !!form.is_on_offer,
+      old_price: form.is_on_offer && form.old_price ? parseFloat(form.old_price) : null,
+      offer_expires_at: form.is_on_offer && form.offer_expires_at ? new Date(form.offer_expires_at).toISOString() : null,
     }
     try {
       if (modal === 'add') {
@@ -139,8 +152,13 @@ export default function AdminProducts() {
                     <div className="flex items-center gap-3">
                       {p.image && <img src={p.image} alt={p.name} className="w-9 h-9 rounded-lg object-cover shrink-0" />}
                       <div>
-                        <p className="font-semibold text-sm" style={{ color: 'var(--text)' }}>
+                        <p className="font-semibold text-sm flex items-center gap-1.5" style={{ color: 'var(--text)' }}>
                           {isAr && p.name_ar ? p.name_ar : p.name}
+                          {p.is_on_offer && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded font-bold text-white" style={{ background:'#dc2626' }}>
+                              {isAr ? 'عرض' : 'OFFER'}
+                            </span>
+                          )}
                         </p>
                         {p.name_ar && <p className="text-xs" style={{ color: 'var(--text3)' }}>
                           {isAr ? p.name : p.name_ar}
@@ -149,7 +167,7 @@ export default function AdminProducts() {
                     </div>
                   </td>
                   <td className="px-4 py-3"><CategoryBadge cat={p.category} /></td>
-                  <td className="px-4 py-3 font-bold" style={{ color: 'var(--primary)' }}>${p.price.toFixed(2)}</td>
+                  <td className="px-4 py-3 font-bold" style={{ color: 'var(--primary)' }}>{formatPrice(p.price)}</td>
                   <td className="px-4 py-3">
                     <span className={`font-bold text-xs px-2 py-1 rounded-lg ${p.stock <= 0 ? 'bg-red-100 text-red-600' : p.stock < 10 ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>
                       {(p.quantity ?? p.stock ?? 0) <= 0 ? t('outOfStock') : (p.quantity ?? p.stock ?? 0) < 10 ? `⚠️ ${p.quantity ?? p.stock ?? 0}` : (p.quantity ?? p.stock ?? 0)}
@@ -210,6 +228,42 @@ export default function AdminProducts() {
                 <select className="input" value={form.section} onChange={e => setForm({ ...form, section: e.target.value })}>
                   {SECTIONS.map(s => <option key={s} value={s}>{s}</option>)}
                 </select>
+              </div>
+
+              {/* Offer fields -- real discount data, replaces the old hardcoded mock offers page */}
+              <div className="rounded-xl p-3" style={{ background: 'var(--surface2)', border: '1px solid var(--border)' }}>
+                <label className="flex items-center justify-between gap-3 cursor-pointer">
+                  <span className="text-xs font-bold" style={{ color: 'var(--text2)' }}>
+                    {isAr ? 'عرض خاص (تخفيض)' : 'On offer (discount)'}
+                  </span>
+                  <button type="button"
+                    onClick={() => setForm({ ...form, is_on_offer: !form.is_on_offer })}
+                    className="relative shrink-0 w-11 h-6 rounded-full transition-colors"
+                    style={{ background: form.is_on_offer ? 'var(--primary)' : 'var(--border)' }}>
+                    <span className="absolute top-0.5 w-5 h-5 rounded-full bg-white transition-transform"
+                      style={{ transform: form.is_on_offer ? 'translateX(1.25rem)' : 'translateX(0.125rem)' }} />
+                  </button>
+                </label>
+
+                {form.is_on_offer && (
+                  <div className="mt-3 space-y-3">
+                    <div>
+                      <label className="block text-xs font-bold mb-1" style={{ color: 'var(--text2)' }}>
+                        {isAr ? 'السعر الأصلي (قبل الخصم)' : 'Original price (before discount)'}
+                      </label>
+                      <input type="number" step="0.01" className="input"
+                        placeholder={isAr ? 'يجب أن يكون أعلى من السعر الحالي' : 'Must be higher than current price'}
+                        value={form.old_price || ''} onChange={e => setForm({ ...form, old_price: e.target.value })} />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold mb-1" style={{ color: 'var(--text2)' }}>
+                        {isAr ? 'تاريخ انتهاء العرض (اختياري)' : 'Offer expires at (optional)'}
+                      </label>
+                      <input type="datetime-local" className="input"
+                        value={form.offer_expires_at || ''} onChange={e => setForm({ ...form, offer_expires_at: e.target.value })} />
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
             <div className="flex gap-3 px-6 py-4" style={{ borderTop: '1px solid var(--border)' }}>
