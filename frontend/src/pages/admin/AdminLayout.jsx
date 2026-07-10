@@ -3,6 +3,7 @@ import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { useAuthStore, useThemeStore } from '../../store'
 import i18n from '../../i18n/index'
+import RefillNotifications from '../../components/admin/RefillNotifications'
 import {
   LayoutDashboard, Package, FileText, Users, Truck, BarChart3,
   ChevronLeft, ChevronRight, ShieldAlert, LogOut, Sun, Moon,
@@ -102,6 +103,9 @@ export default function AdminLayout() {
 
   return (
     <div style={{ height: "100vh", display: "flex", overflow: "hidden", background: 'var(--bg)', fontFamily: "'Cairo', sans-serif" }}>
+      {/* تنبيهات نفاد أنابيب العملات — تبقى ظاهرة بكل صفحات لوحة الأدمن */}
+      <RefillNotifications />
+
       {/* Desktop Sidebar */}
       <aside
         className="hidden lg:flex flex-col sticky top-0 h-screen transition-all duration-300 shrink-0"

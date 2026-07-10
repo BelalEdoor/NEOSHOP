@@ -4,7 +4,6 @@ import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { productApi, sessionApi, analysisApi, createCartWebSocket } from '../hooks/useApi'
 import { useAuthStore, useSessionStore, usePaymentStore } from '../store'
-import { formatPrice } from '../utils/format'
 import {
   Trash2, Plus, Minus, X, Loader2, Package,
   ScanLine, Zap, Tag, ReceiptText, PackageX,
@@ -42,7 +41,7 @@ function InvoiceModal({ invoice, onClose, isAr }) {
               <div style={{ display:'flex',gap:14,flexShrink:0 }}>
                 <span style={{ color:'var(--text3)',fontSize:12 }}>×{item.quantity}</span>
                 <span style={{ fontWeight:800,color:'#16a34a',minWidth:56,textAlign:'end' }}>
-                  {formatPrice((item.unit_price||item.product?.price||0)*item.quantity)}
+                  ${((item.unit_price||item.product?.price||0)*item.quantity).toFixed(2)}
                 </span>
               </div>
             </div>
@@ -50,7 +49,7 @@ function InvoiceModal({ invoice, onClose, isAr }) {
         </div>
         <div style={{ padding:'12px 24px',display:'flex',alignItems:'center',justifyContent:'space-between',background:'var(--surface2)',borderTop:'1px solid var(--border)' }}>
           <span style={{ fontWeight:700,color:'var(--text2)',fontSize:14 }}>{isAr ? 'المجموع الكلي' : 'Total'}</span>
-          <span style={{ fontSize:28,fontWeight:900,color:'#16a34a' }}>{formatPrice(invoice.total_amount||invoice.total||0)}</span>
+          <span style={{ fontSize:28,fontWeight:900,color:'#16a34a' }}>${(invoice.total_amount||invoice.total||0).toFixed(2)}</span>
         </div>
         <div style={{ padding:'14px 24px',background:'#fffbeb',borderTop:'1px solid #fde68a' }}>
           <p style={{ margin:0,fontSize:13,fontWeight:700,color:'#92400e',textAlign:'center' }}>
@@ -61,70 +60,6 @@ function InvoiceModal({ invoice, onClose, isAr }) {
           <button onClick={onClose} style={BTN_GHOST}>{isAr ? 'إغلاق' : 'Close'}</button>
           <button onClick={() => { window.print(); onClose() }} style={{ ...BTN_PRIMARY,background:'#16a34a',display:'flex',alignItems:'center',justifyContent:'center',gap:6 }}>
             <Printer style={{ width:15,height:15 }} />{isAr ? 'طباعة' : 'Print'}
-          </button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Recommendation Modal — shows allergen/health warnings + safe substitute
-// ─────────────────────────────────────────────────────────────────────────────
-function RecommendationModal({ result, scannedName, onClose, onAddSubstitute, onRemoveOriginal, isAr }) {
-  if (!result) return null
-  const isWarning = !result.is_safe
-  return (
-    <div style={OVERLAY}>
-      <div style={{ borderRadius:24,boxShadow:'0 24px 80px rgba(0,0,0,0.35)',width:'100%',maxWidth:440,overflow:'hidden',background:'var(--surface)' }}>
-        <div style={{ padding:'20px 24px',background: isWarning ? '#fff7ed' : '#f0fdf4', borderBottom:'1px solid var(--border)' }}>
-          <div style={{ fontSize:28, marginBottom:6 }}>{isWarning ? '⚠️' : '✅'}</div>
-          <div style={{ fontWeight:800, fontSize:17, color:'var(--text)' }}>
-            {scannedName}
-          </div>
-          {isWarning ? (
-            <div style={{ marginTop:6, fontSize:14, color:'#c2410c', fontWeight:600 }}>
-              {result.warning_message || (isAr ? 'قد لا يكون هذا المنتج مناسباً لك' : 'This product may not be suitable for you')}
-            </div>
-          ) : (
-            <div style={{ marginTop:6, fontSize:14, color:'#15803d', fontWeight:600 }}>
-              {isAr ? 'هذا المنتج مناسب لك' : 'This product looks suitable for you'}
-            </div>
-          )}
-        </div>
-
-        {isWarning && result.suggestions?.length > 0 && (
-          <div style={{ padding:'16px 24px' }}>
-            <div style={{ fontSize:13, fontWeight:700, color:'var(--text2)', marginBottom:10 }}>
-              {isAr ? 'بدائل أكثر أماناً:' : 'Safer alternatives:'}
-            </div>
-            <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
-              {result.suggestions.map(p => (
-                <button key={p.id}
-                  onClick={() => onAddSubstitute(p)}
-                  style={{ display:'flex', alignItems:'center', justifyContent:'space-between',
-                    padding:'10px 14px', borderRadius:12, border:'1px solid var(--border)',
-                    background:'var(--surface2)', cursor:'pointer', textAlign:'start' }}>
-                  <span style={{ fontWeight:600, fontSize:14, color:'var(--text)' }}>
-                    {isAr ? (p.name_ar || p.name) : p.name}
-                  </span>
-                  <span style={{ fontSize:13, color:'var(--text3)' }}>
-                    {formatPrice(p.price)} {p.section ? `· ${p.section}` : ''}
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        <div style={{ display:'flex', gap:10, padding:'16px 24px' }}>
-          {isWarning && onRemoveOriginal && (
-            <button onClick={onRemoveOriginal} style={{ ...BTN_GHOST, color:'#dc2626', borderColor:'#fca5a5' }}>
-              {isAr ? 'عدم الإضافة' : "Don't add it"}
-            </button>
-          )}
-          <button onClick={onClose} style={BTN_GHOST}>
-            {isWarning ? (isAr ? 'إضافة على أي حال' : 'Add anyway') : (isAr ? 'حسناً' : 'OK')}
           </button>
         </div>
       </div>
@@ -156,17 +91,17 @@ function PaymentStatusModal({ session, onClose, isAr }) {
         <div style={{ padding:'24px' }}>
           <div style={{ display:'flex',justifyContent:'space-between',marginBottom:16 }}>
             <span style={{ color:'var(--text3)',fontWeight:600 }}>{isAr ? 'المجموع' : 'Total'}</span>
-            <span style={{ fontWeight:900,fontSize:24,color:'var(--primary)' }}>{formatPrice(paymentData.totalDue||0)}</span>
+            <span style={{ fontWeight:900,fontSize:24,color:'var(--primary)' }}>${(paymentData.totalDue||0).toFixed(2)}</span>
           </div>
           {paymentData.amountInserted > 0 && (
             <>
               <div style={{ display:'flex',justifyContent:'space-between',marginBottom:8 }}>
                 <span style={{ color:'var(--text3)',fontSize:13 }}>{isAr ? 'المُدفوع' : 'Inserted'}</span>
-                <span style={{ fontWeight:700,color:'#16a34a' }}>{formatPrice(paymentData.amountInserted)}</span>
+                <span style={{ fontWeight:700,color:'#16a34a' }}>${paymentData.amountInserted.toFixed(2)}</span>
               </div>
               <div style={{ display:'flex',justifyContent:'space-between',marginBottom:16 }}>
                 <span style={{ color:'var(--text3)',fontSize:13 }}>{isAr ? 'المتبقي' : 'Remaining'}</span>
-                <span style={{ fontWeight:700,color:remaining>0?'#dc2626':'#16a34a' }}>{formatPrice(remaining)}</span>
+                <span style={{ fontWeight:700,color:remaining>0?'#dc2626':'#16a34a' }}>${remaining.toFixed(2)}</span>
               </div>
             </>
           )}
@@ -178,7 +113,7 @@ function PaymentStatusModal({ session, onClose, isAr }) {
               </p>
               {paymentData.changeReturned > 0 && (
                 <p style={{ fontSize:13,color:'#166534',margin:'6px 0 0' }}>
-                  {isAr ? `الباقي: ${formatPrice(paymentData.changeReturned)}` : `Change: ${formatPrice(paymentData.changeReturned)}`}
+                  {isAr ? `الباقي: $${paymentData.changeReturned.toFixed(2)}` : `Change: $${paymentData.changeReturned.toFixed(2)}`}
                 </p>
               )}
             </div>
@@ -303,7 +238,7 @@ function ProductSearchModal({ isAr, onClose, onAdd }) {
                 </p>
                 <p style={{ fontSize:11,color:'var(--text3)',margin:'2px 0 0' }}>{product.category}</p>
               </div>
-              <span style={{ fontWeight:800,fontSize:14,color:'var(--primary)',flexShrink:0 }}>{formatPrice(product.price)}</span>
+              <span style={{ fontWeight:800,fontSize:14,color:'var(--primary)',flexShrink:0 }}>${product.price?.toFixed(2)}</span>
             </button>
           ))}
         </div>
@@ -336,7 +271,6 @@ export default function POSPage() {
   const [processing,    setProcessing]    = useState(false)
   const [notFoundModal, setNotFoundModal] = useState(null)
   const [notFoundForm,  setNotFoundForm]  = useState({ name:'', price:'' })
-  const [recoModal, setRecoModal] = useState(null) // { result, scannedName } | null
   const [savedInvoice,  setSavedInvoice]  = useState(null)
   const [saving,        setSaving]        = useState(false)
   const [showSearch,    setShowSearch]    = useState(false)
@@ -462,6 +396,25 @@ export default function POSPage() {
               toast.error(isAr ? '🔒 تم قفل العربة' : '🔒 Cart locked', { duration: 5000 })
             }
             break
+          case 'refill_needed':
+            // نفدت أنابيب العملات — الدفع متوقف مؤقتاً (ليس ملغى) بانتظار
+            // تعبئة صاحب المتجر، وسيُستكمل تلقائياً بعدها على نفس الفاتورة.
+            updateStatus('AWAITING_REFILL')
+            toast(
+              isAr
+                ? '⏳ الرجاء الانتظار قليلاً، جاري تعبئة الباقي من قبل الموظف...'
+                : '⏳ Please wait a moment, staff is refilling your change...',
+              { duration: 10000, icon: '🪙' }
+            )
+            break
+          case 'refill_resolved':
+            // صاحب المتجر أكّد التعبئة — الدفعة رجعت تكمل تلقائياً
+            updateStatus('PAYMENT_IN_PROGRESS')
+            toast(
+              isAr ? '✅ جاري إكمال إرجاع الباقي...' : '✅ Resuming your change now...',
+              { duration: 4000, icon: '🪙' }
+            )
+            break
         }
       } catch {}
     }
@@ -533,20 +486,6 @@ export default function POSPage() {
           ? (updatedItem.product?.name_ar || updatedItem.product?.name)
           : updatedItem.product?.name
         toast.success(`✅ ${name}`, { duration:1200 })
-
-        // Recommendation check -- only runs if the customer opted in
-        // (decision: opt-in/out toggle, not forced on every scan) and the
-        // backend itself also skips non-food categories automatically.
-        if (user?.recommendations_enabled && updatedItem.product?.id) {
-          analysisApi.check(updatedItem.product.id).then(({ data }) => {
-            if (!data.is_safe) {
-              // Keep the original cart item so choosing a substitute can
-              // REPLACE it instead of adding alongside it (previously this
-              // left both the unsafe item and the substitute in the cart).
-              setRecoModal({ result: data, scannedName: name, originalItem: updatedItem })
-            }
-          }).catch(() => { /* silent -- never block the scan flow on a recommendation failure */ })
-        }
       } else {
         // fallback إذا لا يوجد session
         const { data: product } = await productApi.byBarcode(code)
@@ -586,10 +525,9 @@ export default function POSPage() {
   const handleClearCart = async () => {
     setCartItems([])
     if (sessionId) {
-      // بدء جلسة جديدة — يجب تمرير cart_rfid دائماً
+      // بدء جلسة جديدة
       try {
-        const cartRfid = import.meta.env.VITE_CART_RFID || null
-        const { data } = await sessionApi.start(cartRfid)
+        const { data } = await sessionApi.start()
         setSession(data)
         clearPayment()
       } catch {}
@@ -701,7 +639,7 @@ export default function POSPage() {
                   {isAr ? (item.product?.name_ar||item.product?.name) : item.product?.name}
                 </p>
                 <span style={{ textAlign:'center', fontSize:12, fontWeight:600, color:'var(--text3)' }}>
-                  {formatPrice(item.unit_price||item.product?.price||0)}
+                  ${(item.unit_price||item.product?.price||0).toFixed(2)}
                 </span>
                 <div style={{ display:'flex', alignItems:'center', justifyContent:'center', gap:4 }}>
                   <button onClick={() => handleUpdateQty(item,-1)} disabled={!isSessionActive} style={{ width:24, height:24, borderRadius:6, border:'1px solid var(--border)', background:'var(--surface)', cursor:isSessionActive?'pointer':'not-allowed', display:'flex', alignItems:'center', justifyContent:'center', opacity:isSessionActive?1:0.4 }}>
@@ -713,7 +651,7 @@ export default function POSPage() {
                   </button>
                 </div>
                 <span style={{ textAlign:'end', fontWeight:800, fontSize:14, color:'var(--primary)' }}>
-                  {formatPrice((item.unit_price||item.product?.price||0)*item.quantity)}
+                  ${((item.unit_price||item.product?.price||0)*item.quantity).toFixed(2)}
                 </span>
                 <button onClick={() => handleRemoveItem(item)} disabled={!isSessionActive}
                   style={{ width:28, height:28, borderRadius:8, border:'none', background:'transparent', cursor:isSessionActive?'pointer':'not-allowed', display:'flex', alignItems:'center', justifyContent:'center', color:'var(--text3)', transition:'color 0.1s', opacity:isSessionActive?1:0.4 }}
@@ -789,7 +727,7 @@ export default function POSPage() {
       <div style={{ gridColumn:'1/2', gridRow:'2/3', display:'flex', alignItems:'center', justifyContent:'space-between', padding:'0 18px', background:'var(--surface)', borderTop:'2px solid var(--border)', gap:14 }}>
         <div style={{ display:'flex', alignItems:'baseline', gap:8 }}>
           <span style={{ fontSize:12, color:'var(--text3)', fontWeight:600 }}>{isAr ? 'الإجمالي' : 'Total'}</span>
-          <span style={{ fontSize:30, fontWeight:900, color:'#16a34a', lineHeight:1 }}>{formatPrice(cartTotal)}</span>
+          <span style={{ fontSize:30, fontWeight:900, color:'#16a34a', lineHeight:1 }}>${cartTotal.toFixed(2)}</span>
         </div>
         <div style={{ flex:1 }} />
 
@@ -844,33 +782,6 @@ export default function POSPage() {
       )}
       {savedInvoice && (
         <InvoiceModal invoice={savedInvoice} isAr={isAr} onClose={() => setSavedInvoice(null)} />
-      )}
-      {recoModal && (
-        <RecommendationModal
-          result={recoModal.result}
-          scannedName={recoModal.scannedName}
-          isAr={isAr}
-          onClose={() => setRecoModal(null)}
-          onRemoveOriginal={async () => {
-            const original = recoModal.originalItem
-            setRecoModal(null)
-            if (original) {
-              await handleRemoveItem(original)
-              toast.success(isAr ? 'تم عدم إضافة المنتج' : 'Item not added', { duration:1500 })
-            }
-          }}
-          onAddSubstitute={async (product) => {
-            const original = recoModal.originalItem
-            setRecoModal(null)
-            // Remove the unsafe item first -- previously this step was
-            // missing, so choosing a substitute added it ALONGSIDE the
-            // unsafe item instead of replacing it.
-            if (original) {
-              await handleRemoveItem(original)
-            }
-            if (product.barcode) await handleBarcodeScan(product.barcode)
-          }}
-        />
       )}
       {showPayment && (
         <PaymentStatusModal session={session} isAr={isAr} onClose={() => setShowPayment(false)} />
