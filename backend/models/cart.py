@@ -24,6 +24,9 @@ class CartStatus(str, enum.Enum):
     PENDING_PAYMENT   — انتهى العميل من التسوق وضغط "Finish Shopping"،
                         الفاتورة جاهزة وتنتظر الدفع عند محطة الدفع.
     PAYMENT_IN_PROGRESS — ESP32 قرأ RFID وبدأ عملية الدفع فعلياً.
+    AWAITING_REFILL   — نفدت أنابيب العملات المعدنية أثناء إرجاع الباقي؛
+                        الدفعة متوقفة مؤقتاً (ليست ملغاة) بانتظار تعبئة
+                        صاحب المتجر للجهاز، ثم تُستكمل تلقائياً.
     PAID              — تم الدفع بنجاح وأُغلقت الجلسة.
     CANCELLED         — ألغى العميل الدفع أو انتهت مهلة الانتظار.
     FAILED            — فشلت عملية الدفع لسبب تقني.
@@ -31,6 +34,7 @@ class CartStatus(str, enum.Enum):
     ACTIVE              = "ACTIVE"
     PENDING_PAYMENT     = "PENDING_PAYMENT"
     PAYMENT_IN_PROGRESS = "PAYMENT_IN_PROGRESS"
+    AWAITING_REFILL     = "AWAITING_REFILL"
     PAID                = "PAID"
     CANCELLED           = "CANCELLED"
     FAILED              = "FAILED"

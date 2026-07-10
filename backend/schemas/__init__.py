@@ -14,6 +14,7 @@ class CartStatusEnum(str, Enum):
     ACTIVE              = "ACTIVE"
     PENDING_PAYMENT     = "PENDING_PAYMENT"
     PAYMENT_IN_PROGRESS = "PAYMENT_IN_PROGRESS"
+    AWAITING_REFILL     = "AWAITING_REFILL"
     PAID                = "PAID"
     CANCELLED           = "CANCELLED"
     FAILED              = "FAILED"
@@ -26,6 +27,7 @@ class UserRoleEnum(str, Enum):
 class PaymentStatusEnum(str, Enum):
     PENDING     = "PENDING"
     IN_PROGRESS = "IN_PROGRESS"
+    AWAITING_REFILL = "AWAITING_REFILL"
     COMPLETED   = "COMPLETED"
     FAILED      = "FAILED"
 
@@ -220,10 +222,24 @@ class PaymentOut(BaseModel):
     total_due:      float
     amount_inserted: float
     change_returned: float
+    pending_change: float = 0.0
     method:         str
     status:         str
     started_at:     Optional[datetime] = None
     completed_at:   Optional[datetime] = None
+    class Config:
+        from_attributes = True
+
+class RefillAlertOut(BaseModel):
+    """تنبيه نفاد أنابيب العملات — يُعرض بلوحة الأدمن."""
+    payment_id:       int
+    invoice_id:       Optional[int] = None
+    invoice_code:     Optional[str] = None
+    session_id:       Optional[int] = None
+    cart_rfid:        Optional[str] = None
+    remaining_change: float
+    device_id:        Optional[str] = None
+    started_at:       Optional[datetime] = None
     class Config:
         from_attributes = True
 

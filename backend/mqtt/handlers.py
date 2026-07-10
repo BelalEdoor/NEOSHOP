@@ -23,6 +23,7 @@ def setup_handlers():
     mqtt_service.subscribe(Topics.PAYMENT_COINS,    handle_coin_inserted)
     mqtt_service.subscribe(Topics.PAYMENT_BILLS,    handle_bill_inserted)
     mqtt_service.subscribe(Topics.PAYMENT_COMPLETE, handle_payment_complete)
+    mqtt_service.subscribe(Topics.REFILL_REQUEST,   handle_refill_needed)
     mqtt_service.subscribe(Topics.CART_RFID,        handle_cart_rfid)
     log.info("[MQTT] All handlers registered")
 
@@ -264,6 +265,7 @@ async def handle_payment_complete(topic: str, payload: dict):
         payment.status          = PaymentStatus.COMPLETED
         payment.amount_inserted  = amount_inserted
         payment.change_returned  = change_returned
+        payment.pending_change   = 0.0  # لو كانت الدفعة متوقفة بانتظار تعبئة، انتهى الانتظار
         payment.completed_at    = datetime.now(timezone.utc)
 
         # تحديث الفاتورة
@@ -319,6 +321,93 @@ async def handle_payment_complete(topic: str, payload: dict):
 
     except Exception as e:
         log.error(f"[MQTT] handle_payment_complete error: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+
+async def handle_refill_needed(topic: str, payload: dict):
+    """
+    ESP32 أبلغ أن أنابيب العملات نفدت أثناء إرجاع الباقي، والدفعة متوقفة
+    مؤقتاً (Payment/Session لسا موجودين، مش ملغيين).
+    payload: {
+      "event": "refill_needed", "cart_rfid": "...", "payment_id": 5,
+      "invoice_id": 3, "invoice_code": "INV-...", "session_id": 7,
+      "remaining_change": 1, "device_id": "ESP32-PAYMENT-01"
+    }
+
+    الخطوات:
+    1. تحديث حالة الدفعة/الجلسة إلى AWAITING_REFILL وتخزين المبلغ المتبقي
+    2. إشعار WebSocket للأدمن (لوحة التحكم) — يشمل تفعيل إشعارات الموقع
+    3. إشعار WebSocket للعميل الواقف قدام الجهاز (نفس القناة يلي بيتابع فيها الدفع)
+    """
+    payment_id       = payload.get("payment_id")
+    remaining_change = payload.get("remaining_change", 0)
+    invoice_code     = payload.get("invoice_code", "")
+    cart_rfid        = payload.get("cart_rfid", "")
+    device_id        = payload.get("device_id", "")
+
+    if not payment_id:
+        log.error("[MQTT] refill_needed: missing payment_id")
+        return
+
+    db: Session = SessionLocal()
+    try:
+        from models.payment import Payment, PaymentStatus
+        from models.invoice import Invoice
+        from models.session import ShoppingSession
+        from models.cart import CartStatus
+
+        payment = db.query(Payment).filter(Payment.id == payment_id).first()
+        if not payment:
+            log.error(f"[MQTT] refill_needed: payment {payment_id} not found")
+            return
+
+        payment.status         = PaymentStatus.AWAITING_REFILL
+        payment.pending_change = remaining_change
+        payment.esp32_device_id = device_id or payment.esp32_device_id
+
+        invoice = db.query(Invoice).filter(Invoice.id == payment.invoice_id).first()
+        session = db.query(ShoppingSession).filter(
+            ShoppingSession.id == invoice.session_id
+        ).first() if invoice else None
+
+        if session:
+            session.status = CartStatus.AWAITING_REFILL
+
+        db.commit()
+
+        log.warning(
+            f"[MQTT] REFILL NEEDED — payment {payment_id} "
+            f"(invoice {invoice_code}), still owed {remaining_change} NIS"
+        )
+
+        alert_data = {
+            "payment_id":       payment_id,
+            "invoice_id":       payment.invoice_id,
+            "invoice_code":     invoice_code,
+            "session_id":       session.id if session else None,
+            "cart_rfid":        cart_rfid,
+            "remaining_change": remaining_change,
+            "device_id":        device_id,
+        }
+
+        if ws_manager:
+            # ملاحظة: broadcast_to_session بترسل تلقائياً نسخة للأدمن كمان،
+            # فما بنكرر الإرسال يدوياً لتفادي وصول نفس التنبيه مرتين.
+            if session:
+                await ws_manager.broadcast_to_session(session.id, {
+                    "type": "refill_needed",
+                    "data": alert_data,
+                })
+            else:
+                await ws_manager.broadcast_to_admin({
+                    "type": "refill_needed",
+                    "data": alert_data,
+                })
+
+    except Exception as e:
+        log.error(f"[MQTT] handle_refill_needed error: {e}")
         db.rollback()
     finally:
         db.close()

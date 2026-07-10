@@ -19,6 +19,9 @@ from models.recommendation_engine import (
     RecommendationLog,
 )
 
+# ─── Store Map System (new) ──────────────────────────────────────────────────
+from models.map import Section, Shelf, CartLiveStatus, MarkerReadLog
+
 __all__ = [
     "User", "Product",
     "Cart", "CartItem",
@@ -29,4 +32,5 @@ __all__ = [
     "Allergen", "CustomerAllergy", "ProductAllergen",
     "HealthCondition", "CustomerHealthCondition",
     "RecommendationLog",
+    "Section", "Shelf", "CartLiveStatus", "MarkerReadLog",
 ]

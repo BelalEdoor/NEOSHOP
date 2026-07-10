@@ -33,7 +33,7 @@ import models  # noqa: F401 — triggers __init__.py which imports all models
 
 # ─── Import routers ───────────────────────────────────────────────────────────
 from routers import auth, users, products, session, cart, payment
-from routers import invoices, theft, analysis, admin
+from routers import invoices, theft, analysis, admin, navigation
 from websocket_router import router as ws_router, manager as ws_manager
 from mqtt.client import mqtt_service
 from mqtt.handlers import setup_handlers
@@ -213,7 +213,8 @@ app.include_router(theft.router,     prefix="/api/theft",    tags=["Theft Detect
 app.include_router(analysis.router,  prefix="/api/analysis", tags=["AI Analysis"])
 
 # Admin Dashboard
-app.include_router(admin.router,     prefix="/api/admin",    tags=["Admin"])
+app.include_router(admin.router,      prefix="/api/admin",      tags=["Admin"])
+app.include_router(navigation.router, prefix="/api/navigation", tags=["Navigation"])
 
 # WebSocket
 app.include_router(ws_router, tags=["WebSocket"])

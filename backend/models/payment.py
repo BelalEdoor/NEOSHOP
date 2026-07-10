@@ -16,6 +16,7 @@ import enum
 class PaymentStatus(str, enum.Enum):
     PENDING    = "PENDING"
     IN_PROGRESS = "IN_PROGRESS"
+    AWAITING_REFILL = "AWAITING_REFILL"  # نفدت أنابيب العملات — الدفعة متوقفة مؤقتاً
     COMPLETED  = "COMPLETED"
     FAILED     = "FAILED"
     REFUNDED   = "REFUNDED"
@@ -38,6 +39,9 @@ class Payment(Base):
     total_due      = Column(Float, nullable=False)
     amount_inserted = Column(Float, default=0.0)
     change_returned = Column(Float, default=0.0)
+    # NEW — المبلغ (NIS) اللي لسا الجهاز لازم يرجعه للعميل، معبّى فقط وقت
+    # AWAITING_REFILL. صفر يعني ما في شي معلّق.
+    pending_change = Column(Float, default=0.0)
     method         = Column(Enum(PaymentMethod), default=PaymentMethod.CASH)
 
     # ─── Status ───────────────────────────────────────────────────────────

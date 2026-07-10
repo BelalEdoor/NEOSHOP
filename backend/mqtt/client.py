@@ -9,10 +9,13 @@ Topics المستخدمة:
   cart/status          ← تغييرات حالة السلة
   cart/rfid            ← إشعار قراءة RFID من Raspberry Pi
   payment/request      → من ESP32: طلب بيانات الفاتورة
-  payment/status       ← من/إلى ESP32: حالة الدفع
+  payment/status       ← من/إلى ESP32: حالة الدفع (invoice_ready, no_invoice,
+                          payment_confirmed, وكمان refill_done → إلى ESP32)
   payment/coins        ← من ESP32: تتبع العملات المعدنية
   payment/bills        ← من ESP32: تتبع الأوراق النقدية
   payment/complete     ← من ESP32: اكتمال الدفع
+  payment/refill_request ← من ESP32: نفدت أنابيب العملات، الدفعة متوقفة
+                            مؤقتاً وبانتظار تعبئة صاحب المتجر (NEW)
 """
 import json
 import logging
@@ -38,6 +41,7 @@ class Topics:
     PAYMENT_COINS    = "payment/coins"
     PAYMENT_BILLS    = "payment/bills"
     PAYMENT_COMPLETE = "payment/complete"
+    REFILL_REQUEST   = "payment/refill_request"  # NEW — من ESP32 عند نفاد أنابيب العملات
 
     # Theft Detection
     THEFT_ALERT  = "security/theft_alert"
@@ -87,6 +91,7 @@ class MQTTService:
                 Topics.PAYMENT_COINS,
                 Topics.PAYMENT_BILLS,
                 Topics.PAYMENT_COMPLETE,
+                Topics.REFILL_REQUEST,
                 Topics.CART_RFID,
             ]
             for topic in topics:
@@ -160,6 +165,16 @@ class MQTTService:
             "event": "payment_confirmed",
             "cart_rfid": cart_rfid,
             **payment_data
+        })
+
+    def publish_refill_done(self, payment_id: int):
+        """
+        إشعار الـ ESP32 بأن صاحب المتجر عبّى أنابيب العملات، وأنه يقدر
+        يكمل صرف الباقي المتبقي على نفس الفاتورة (بدون إلغاء أو إعادة البدء).
+        """
+        self.publish(Topics.PAYMENT_STATUS, {
+            "event": "refill_done",
+            "payment_id": payment_id,
         })
 
     def publish_theft_alert(self, session_id: int, alert_type: str, details: dict):
