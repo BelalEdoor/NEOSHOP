@@ -243,6 +243,18 @@ class RefillAlertOut(BaseModel):
     class Config:
         from_attributes = True
 
+class RefillNotificationOut(BaseModel):
+    """صف واحد بصفحة (الإشعارات) — تنبيه نفاد أنابيب، نشط أو محلول."""
+    payment_id:       int
+    invoice_code:     Optional[str] = None
+    device_id:        Optional[str] = None
+    remaining_change: float
+    status:           str  # "pending" | "resolved"
+    requested_at:     Optional[datetime] = None
+    resolved_at:      Optional[datetime] = None
+    class Config:
+        from_attributes = True
+
 class CoinInsertedPayload(BaseModel):
     """يُرسَل من ESP32 عبر MQTT عند إدخال عملة."""
     cart_rfid:    str

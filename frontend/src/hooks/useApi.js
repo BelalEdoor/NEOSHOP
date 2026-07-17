@@ -15,6 +15,7 @@ import axios from 'axios'
 
 const BASE_URL = (import.meta.env.VITE_API_URL || 'http://localhost:8000') + '/api'
 const WS_BASE  = import.meta.env.VITE_WS_URL  || 'ws://localhost:8000'
+export { BASE_URL }
 
 const api = axios.create({
   baseURL: BASE_URL,
@@ -65,7 +66,6 @@ export const userApi = {
 // ─── Products ─────────────────────────────────────────────────────────────────
 export const productApi = {
   list:      (params) => api.get('/products/', { params }),
-  offers:    ()        => api.get('/products/offers'),
   get:       (id)     => api.get(`/products/${id}`),
   byBarcode: (barcode) => api.get(`/products/barcode/${barcode}`),
   create:    (data)   => api.post('/products/', data),
@@ -124,17 +124,12 @@ export const paymentApi = {
   getStatus:    (sessionId) => api.get(`/payments/status/${sessionId}`),
   getPayments:  (sessionId) => api.get(`/payments/session/${sessionId}`),
   cancel:       (paymentId) => api.post(`/payments/cancel/${paymentId}`),
-}
-
-// ─── Allergens & Health Conditions (for onboarding / profile) ───────────────
-export const allergensApi = {
-  list: () => api.get('/analysis/allergens'),
-}
-export const healthConditionsApi = {
-  list: () => api.get('/analysis/health-conditions'),
-}
-export const onboardingApi = {
-  submit: (data) => api.post('/analysis/onboarding', data),
+  // NEW — نفاد أنابيب العملات وتعبئتها
+  getPendingRefills: () => api.get('/payments/pending-refills'),
+  confirmRefill:     (paymentId) => api.post(`/payments/confirm-refill/${paymentId}`),
+  getRefillNotifications: (limit = 100) => api.get('/payments/refill-notifications', { params: { limit } }),
+  deleteRefillNotification: (paymentId) => api.delete(`/payments/refill-notifications/${paymentId}`),
+  forceReactivate: (paymentId) => api.post(`/payments/force-reactivate/${paymentId}`),
 }
 
 // ─── Analysis (AI) ────────────────────────────────────────────────────────────
@@ -147,6 +142,19 @@ export const analysisApi = {
     api.post(`/analysis/ai/${product_id}`),
   barcodeScan: (barcode) =>
     api.get(`/analysis/barcode-scan/${barcode}`),
+}
+
+// ─── Onboarding (allergies / health conditions picked right after register) ──
+export const allergensApi = {
+  list: () => api.get('/analysis/allergens'),
+}
+
+export const healthConditionsApi = {
+  list: () => api.get('/analysis/health-conditions'),
+}
+
+export const onboardingApi = {
+  submit: (payload) => api.post('/analysis/onboarding', payload),
 }
 
 // ─── Theft / Security ─────────────────────────────────────────────────────────

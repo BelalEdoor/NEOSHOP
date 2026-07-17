@@ -1,26 +1,35 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { useAuthStore, useThemeStore } from '../../store'
+import { useAuthStore, useThemeStore, useRefillStore } from '../../store'
 import i18n from '../../i18n/index'
 import RefillNotifications from '../../components/admin/RefillNotifications'
 import {
   LayoutDashboard, Package, FileText, Users, Truck, BarChart3,
   ChevronLeft, ChevronRight, ShieldAlert, LogOut, Sun, Moon,
-  ShoppingBag, Shield, Menu, Globe, ShoppingCart
+  Shield, Menu, Globe, ShoppingCart, Bell, Map as MapIcon
 } from 'lucide-react'
 
 export default function AdminLayout() {
   const { t } = useTranslation()
   const { user, logout } = useAuthStore()
   const { dark, toggleDark } = useThemeStore()
+  const pendingRefillCount = useRefillStore(s => s.pendingAlerts.length)
   const navigate = useNavigate()
   const [collapsed, setCollapsed] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
   const isAr = i18n.language === 'ar'
 
+  // لوحة الأدمن تحترم تفضيل الوضع الداكن/الفاتح المحفوظ (بعكس واجهة
+  // العميل اللي لازم تضل فاتحة دائماً — راجع components/ui/Layout.jsx)
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', dark)
+  }, [dark])
+
   const NAV_ITEMS = [
     { to: '/admin',            icon: LayoutDashboard, labelKey: 'adminDashboard', end: true },
+    { to: '/admin/map',        icon: MapIcon,         labelKey: 'liveMapTitle'   },
+    { to: '/admin/notifications', icon: Bell,         labelKey: 'notificationsTitle', badge: pendingRefillCount },
     { to: '/admin/products',   icon: Package,         labelKey: 'productsTitle'  },
     { to: '/admin/carts',      icon: ShoppingCart,    labelKey: 'cartsTitle'     },
     { to: '/admin/invoices',   icon: FileText,        labelKey: 'invoicesTitle'  },
@@ -51,7 +60,7 @@ export default function AdminLayout() {
       </div>
 
       <nav className="flex-1 py-4 overflow-y-auto">
-        {NAV_ITEMS.map(({ to, icon: Icon, labelKey, end }) => (
+        {NAV_ITEMS.map(({ to, icon: Icon, labelKey, end, badge }) => (
           <NavLink
             key={to} to={to} end={end}
             onClick={() => setMobileOpen(false)}
@@ -61,8 +70,21 @@ export default function AdminLayout() {
               }`
             }
           >
-            <Icon className="w-4 h-4 shrink-0" />
-            {!collapsed && <span>{t(labelKey)}</span>}
+            <span className="relative shrink-0">
+              <Icon className="w-4 h-4" />
+              {!!badge && (
+                <span className="absolute -top-1.5 -end-1.5 min-w-[15px] h-[15px] px-[3px] rounded-full text-[9px] font-bold flex items-center justify-center text-white"
+                  style={{ background: '#dc2626' }}>
+                  {badge > 9 ? '9+' : badge}
+                </span>
+              )}
+            </span>
+            {!collapsed && <span className="flex-1">{t(labelKey)}</span>}
+            {!collapsed && !!badge && (
+              <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold text-white" style={{ background: '#dc2626' }}>
+                {badge > 9 ? '9+' : badge}
+              </span>
+            )}
           </NavLink>
         ))}
       </nav>
@@ -153,14 +175,6 @@ export default function AdminLayout() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => navigate('/')}
-              className="hidden sm:flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold transition-all"
-              style={{ background: 'var(--primary-light)', color: 'var(--primary)' }}
-            >
-              <ShoppingBag className="w-3.5 h-3.5" />
-              {t('backToPOS')}
-            </button>
             <div className="w-8 h-8 rounded-xl flex items-center justify-center font-bold text-sm text-white"
               style={{ background: 'linear-gradient(135deg, #1e40af, #6366f1)' }}>
               {user?.name?.[0] || 'A'}

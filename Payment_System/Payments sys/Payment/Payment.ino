@@ -40,8 +40,8 @@
  *     5 Shekels -> GPIO 22
  *     10 Shekels-> GPIO 2    (not physically installed yet, still programmed)
  *
- *   1.8" TFT SPI Display (128x160, ST7735) — NEW:
- *     Shares the SPI bus (SCK/MOSI) with the RC522 RFID reader; only CS/DC/RST/LED are dedicated.
+ *   1.8" TFT SPI Display (128x160, ST7735):
+ *     Shares the SPI bus (SCK/MOSI) with the RC522 RFID reader; only CS/DC/RST are dedicated.
  *     VCC    -> 3.3V
  *     GND    -> GND (shared)
  *     CS     -> GPIO 4
@@ -49,22 +49,22 @@
  *     A0(DC) -> GPIO 16
  *     SDA    -> GPIO 23 (shared with RFID MOSI)
  *     SCK    -> GPIO 13 (shared with RFID SCK)
- *     LED    -> GPIO 21 (backlight)
+ *     LED    -> VCC directly (backlight always on, NOT GPIO-controlled)
  *     (SD card slot on the display board is NOT used)
  *
- *   Vibration Motor (settles coins on the acceptor's track) — NEW:
- *     Driven via one channel of an L298N dual H-bridge driver module:
- *       ESP32 GPIO 25 -> L298N IN1
- *       L298N IN2     -> GND (fixed direction, motor only needs ON/OFF)
- *       L298N ENA     -> leave jumper cap in place (always full power)
- *       L298N OUT1/OUT2 -> motor terminals (either order)
- *       L298N VS      -> external supply matching motor's rated voltage
- *                        (L298N has ~2V internal drop; add ~2V if you want
- *                        the motor to see its full rated voltage)
- *       L298N GND     -> shared GND (ESP32 + external supply)
- *       L298N +5V     -> leave disconnected (onboard regulator handles it
- *                        via the 5V jumper, if populated)
- *     Triggers briefly the moment coin-accepting starts (on invoice_ready).
+ *   Vibration Motor (settles coins on the acceptor's track) — driven via one
+ *   channel of an L298N dual H-bridge driver module:
+ *     ESP32 GPIO 21 -> L298N IN1
+ *     L298N IN2     -> GND (fixed direction, motor only needs ON/OFF)
+ *     L298N ENA     -> leave jumper cap in place (always full power)
+ *     L298N OUT1/OUT2 -> motor terminals (either order)
+ *     L298N VS      -> external supply matching motor's rated voltage
+ *                      (L298N has ~2V internal drop; add ~2V if you want
+ *                      the motor to see its full rated voltage)
+ *     L298N GND     -> shared GND (ESP32 + external supply)
+ *     L298N +5V     -> leave disconnected (onboard regulator handles it
+ *                      via the 5V jumper, if populated)
+ *   Triggers briefly the moment coin-accepting starts (on invoice_ready).
  *
  *   NOTE (refill-pause flow):
  *     - returnChange() now RETURNS the remaining un-dispensed amount (int)
@@ -85,6 +85,27 @@
  *       return. If it's STILL short after refill (e.g. wrong denomination
  *       refilled), it pauses again and re-alerts the owner with the new
  *       remaining amount — it does not silently give up.
+ *
+ *   FIX LOG:
+ *     - VIBRATION_MOTOR_PIN was previously mis-defined as GPIO 4, which
+ *       collided with TFT_CS (also GPIO 4). That collision forced the TFT's
+ *       chip-select LOW at boot (via digitalWrite(VIBRATION_MOTOR_PIN, LOW)
+ *       in setup()), leaving the TFT permanently "selected" on the shared
+ *       SPI bus and corrupting all RC522 communication (constant
+ *       STATUS_ERROR / status=1 on every PICC_RequestA). Moved the
+ *       vibration motor to GPIO 21, which was freed up after wiring the
+ *       TFT backlight (LED) directly to VCC instead of a GPIO pin.
+ *     - Vibration motor was originally driven with a BLOCKING safeDelay()
+ *       inside triggerVibrationMotor(), called synchronously from
+ *       mqttCallback() on invoice_ready. At 800ms this was barely
+ *       noticeable, but bumping it to a full 1-minute buzz would have
+ *       frozen the ENTIRE device for that minute (no RFID reads, no coin
+ *       processing, no display updates) since it's called from inside the
+ *       MQTT callback. Rewrote as non-blocking: startVibrationMotor() turns
+ *       the pin on and records a start time; updateVibrationMotor(), polled
+ *       every loop() iteration, turns it back off once the duration has
+ *       elapsed. The invoice screen and coin acceptance now work normally
+ *       while the motor buzzes in the background.
  */
 
 #include <Arduino.h>
@@ -99,9 +120,9 @@
 #include <Adafruit_ST7735.h>
 
 // ─── WiFi & MQTT Config ───────────────────────────────────────────────────────
-const char* WIFI_SSID   = "CELab";
-const char* WIFI_PASS   = "CELabC207";
-const char* MQTT_BROKER = "192.168.0.143";
+const char* WIFI_SSID   = "C203";
+const char* WIFI_PASS   = "15159519";
+const char* MQTT_BROKER = "10.3.20.22";
 const int   MQTT_PORT   = 1883;
 const char* MQTT_USER   = "neoshop";
 const char* MQTT_PASS_S = "neoshop_mqtt_pass";
@@ -142,14 +163,15 @@ const char* TOPIC_REFILL_REQUEST   = "payment/refill_request"; // published when
 #define IR_PIN_10 2
 
 // ─── TFT Display Pins (shares SCK/MOSI with the RC522 on the SPI bus) ─────────
+// NOTE: LED (backlight) is wired directly to VCC now — no GPIO needed for it.
 #define TFT_CS    4
 #define TFT_RST   17
 #define TFT_DC    16
-#define TFT_LED   21
 
 // ─── Vibration Motor Pin (aligns coins on the track when coin-accepting starts) ─
-#define VIBRATION_MOTOR_PIN 4
-#define VIBRATION_DURATION_MS 800   // how long the motor buzzes for
+// Moved to GPIO 21 (was mistakenly GPIO 4, which collided with TFT_CS).
+#define VIBRATION_MOTOR_PIN 21
+#define VIBRATION_DURATION_MS 60000   // how long the motor buzzes for (1 minute)
 
 // ─── IR Detection Calibration ──────────────────────────────────────────────────
 #define IR_DETECTION_WINDOW  600
@@ -158,7 +180,7 @@ const char* TOPIC_REFILL_REQUEST   = "payment/refill_request"; // published when
 
 // ─── Change Return Calibration ─────────────────────────────────────────────────
 #define SERVO_REST_ANGLE     90
-#define PUSH_DELTA_ANGLE    -27
+#define PUSH_DELTA_ANGLE    -35
 #define PUSH_DIRECTION       (+1)
 #define SERVO_PUSH_ANGLE     (SERVO_REST_ANGLE + (PUSH_DIRECTION * PUSH_DELTA_ANGLE))
 
@@ -243,6 +265,11 @@ unsigned long paymentDoneTimestamp = 0;
 const int RFID_TIMEOUT_MS    = 10000;
 const int RESULT_DISPLAY_MS  = 6000;
 
+// ─── Vibration Motor State (non-blocking) ──────────────────────────────────────
+bool          vibrationActive    = false;
+unsigned long vibrationStartTime = 0;
+unsigned long vibrationDuration  = VIBRATION_DURATION_MS;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Coin ISR
 // ─────────────────────────────────────────────────────────────────────────────
@@ -286,11 +313,10 @@ const char* getCoinLabel(int pulses) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// TFT Display Helpers — NEW
+// TFT Display Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 void setupDisplay() {
-  pinMode(TFT_LED, OUTPUT);
-  digitalWrite(TFT_LED, HIGH);   // backlight on
+  // Backlight (LED) is wired directly to VCC now — always on, no GPIO control needed.
 
   tft.initR(INITR_BLACKTAB);     // most common for this 128x160 V1.1 board
   // If colors look swapped/inverted on your unit, try INITR_GREENTAB instead.
@@ -320,15 +346,25 @@ void updateDisplayStatus(String line1, String line2 = "", String line3 = "", uin
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Vibration Motor — NEW: buzzes briefly the moment coin-accepting starts, to
-// settle/align a coin that may be sitting crooked on the acceptor's track.
+// Vibration Motor — buzzes for `durationMs` to settle/align coins on the
+// acceptor's track, WITHOUT blocking the rest of the program (RFID reads,
+// coin processing, display updates, MQTT). Turned on here, turned back off
+// from updateVibrationMotor() which is polled every loop() iteration.
 // ─────────────────────────────────────────────────────────────────────────────
-void triggerVibrationMotor(unsigned long durationMs = VIBRATION_DURATION_MS) {
+void startVibrationMotor(unsigned long durationMs = VIBRATION_DURATION_MS) {
   Serial.println("[Vibration] Motor ON (" + String(durationMs) + " ms)");
   digitalWrite(VIBRATION_MOTOR_PIN, HIGH);
-  safeDelay(durationMs);
-  digitalWrite(VIBRATION_MOTOR_PIN, LOW);
-  Serial.println("[Vibration] Motor OFF");
+  vibrationActive    = true;
+  vibrationStartTime = millis();
+  vibrationDuration  = durationMs;
+}
+
+void updateVibrationMotor() {
+  if (vibrationActive && millis() - vibrationStartTime >= vibrationDuration) {
+    digitalWrite(VIBRATION_MOTOR_PIN, LOW);
+    vibrationActive = false;
+    Serial.println("[Vibration] Motor OFF");
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -619,7 +655,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
       Serial.println("[Payment] Insert coins...");
 
       updateDisplayStatus("Due: " + String(totalDue, 2) + " NIS", "Insert coins");
-      triggerVibrationMotor();   // buzz once to settle/align the coin track as we start accepting
+      startVibrationMotor();   // buzz (non-blocking) to settle/align the coin track as we start accepting
 
     // ── No Invoice ────────────────────────────────────────────────────────
     } else if (event == "no_invoice") {
@@ -677,12 +713,9 @@ void setup() {
   Serial.begin(115200);
   Serial.println("\n[NEOSHOP] Payment Station Starting...");
 
-  // FIX: On a shared SPI bus, every device's CS line must be HIGH
-  // (deselected) except the one currently being talked to. The TFT's CS
-  // (GPIO 4) is otherwise left floating until setupDisplay() runs later,
-  // which can make the display respond to traffic meant for the RC522 and
-  // corrupt its init (seen as "Firmware: 0x0"). Deselect it immediately,
-  // before any SPI traffic happens.
+  // On a shared SPI bus, every device's CS line must be HIGH (deselected)
+  // except the one currently being talked to. Deselect the TFT immediately,
+  // before any SPI traffic happens, so it doesn't interfere with the RC522.
   pinMode(TFT_CS, OUTPUT);
   digitalWrite(TFT_CS, HIGH);
 
@@ -741,6 +774,9 @@ void loop() {
     }
   }
   mqtt.loop();
+
+  // ── Vibration Motor (non-blocking timer) ────────────────────────────────────
+  updateVibrationMotor();
 
   // ── RFID Timeout ────────────────────────────────────────────────────────────
   if (state == STATE_WAITING_INVOICE &&

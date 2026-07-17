@@ -4,7 +4,7 @@ routers/users.py — إدارة بيانات المستخدمين
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from core.database import get_db
-from core.security import get_current_user, get_client_ip, audit
+from core.security import get_current_user, get_client_ip, audit, ADMIN_EMAILS
 from models.user import User
 from schemas import UserOut, UserUpdate
 import json
@@ -51,3 +51,47 @@ def update_me(
     db.refresh(current_user)
     audit("user_update", current_user.id, ip, "Profile updated")
     return _to_out(current_user)
+
+
+@router.post("/{user_id}/disable", response_model=UserOut)
+def disable_user(
+    user_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    تعطيل حساب عميل — يُستخدم من نافذة "مراقبة العربة" بخريطة الأدمن عند
+    حدوث نشاط مشبوه. الحساب يُقفَل فوراً: أي طلب لاحق من جلسة العميل
+    (حتى لو التوكن ما زال صالحاً) يُرفض بـ 403 (راجع core/security.py).
+    """
+    if current_user.email not in ADMIN_EMAILS:
+        raise HTTPException(403, "Admin access required")
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(404, "User not found")
+    user.is_active = False
+    db.commit()
+    db.refresh(user)
+    audit("user_disabled", current_user.id, get_client_ip(request), f"Disabled user {user_id} ({user.email})")
+    return _to_out(user)
+
+
+@router.post("/{user_id}/enable", response_model=UserOut)
+def enable_user(
+    user_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """إعادة تفعيل حساب عميل بعد مراجعة الحدث المشبوه."""
+    if current_user.email not in ADMIN_EMAILS:
+        raise HTTPException(403, "Admin access required")
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(404, "User not found")
+    user.is_active = True
+    db.commit()
+    db.refresh(user)
+    audit("user_enabled", current_user.id, get_client_ip(request), f"Enabled user {user_id} ({user.email})")
+    return _to_out(user)

@@ -21,6 +21,9 @@ import { ShieldCheck, Loader2, ArrowRight, SkipForward } from 'lucide-react'
  * page is never shown again automatically after the first time.
  */
 export default function OnboardingPage() {
+  // جزء من تجربة العميل الفاتحة دائماً — راجع ملاحظة components/ui/Layout.jsx
+  useEffect(() => { document.documentElement.classList.remove('dark') }, [])
+
   const { t, i18n } = useTranslation()
   const isAr = i18n.language === 'ar'
   const navigate = useNavigate()

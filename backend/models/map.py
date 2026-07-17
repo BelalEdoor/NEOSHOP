@@ -72,7 +72,7 @@ class CartLiveStatus(Base):
     # None       = لم تكتمل الحركة بعد (علامة واحدة فقط)
     direction = Column(String(10), nullable=True)
 
-    # رقم الممر: 1 (بين SEC1 وSEC2) أو 2 (بين SEC2 وSEC3)
+    # رقم الممر: 1 (ملاصق للقسم A) أو 2 (ملاصق للقسم C) — راجع routers/navigation.py
     aisle_id  = Column(Integer, nullable=True)
 
     # True = العربة داخل ممر حالياً (قرأ علامة واحدة ولم يخرج بعد)

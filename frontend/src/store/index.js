@@ -108,3 +108,24 @@ export const usePaymentStore = create((set) => ({
     amountInserted: 0, changeReturned: 0, invoiceCode: null,
   }),
 }))
+
+// ─── Refill Alerts Store (NEW) ─────────────────────────────────────────────────
+// مصدر واحد مشترك للتنبيهات النشطة (نفاد أنابيب العملات) — يستخدمه:
+//   1. RefillNotifications.jsx (البطاقة العائمة + اتصال WebSocket الوحيد)
+//   2. شارة العدد بالسايدبار (AdminLayout)
+//   3. صفحة الإشعارات (AdminNotifications)
+// بهاي الطريقة اتصال الـ WebSocket واحد بس، وكل الأماكن بتعرض نفس البيانات.
+export const useRefillStore = create((set) => ({
+  pendingAlerts: [],   // [{payment_id, invoice_code, remaining_change, device_id, ...}]
+
+  setPendingAlerts: (alerts) => set({ pendingAlerts: alerts }),
+
+  addPendingAlert: (alert) => set((state) => {
+    if (state.pendingAlerts.some(a => a.payment_id === alert.payment_id)) return state
+    return { pendingAlerts: [alert, ...state.pendingAlerts] }
+  }),
+
+  removePendingAlert: (paymentId) => set((state) => ({
+    pendingAlerts: state.pendingAlerts.filter(a => a.payment_id !== paymentId),
+  })),
+}))

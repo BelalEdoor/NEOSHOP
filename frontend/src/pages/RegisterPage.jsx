@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import toast from 'react-hot-toast'
@@ -11,6 +11,9 @@ export default function RegisterPage() {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const setAuth = useAuthStore((s) => s.setAuth)
+  // جزء من تجربة العميل الفاتحة دائماً — راجع ملاحظة components/ui/Layout.jsx
+  useEffect(() => { document.documentElement.classList.remove('dark') }, [])
+
   const [form, setForm] = useState({ name: '', email: '', password: '' })
   const [loading, setLoading] = useState(false)
   const [errors, setErrors] = useState({})

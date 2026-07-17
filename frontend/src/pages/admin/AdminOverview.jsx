@@ -1,12 +1,11 @@
 import React, { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { productApi } from '../../hooks/useApi'
-import api from '../../hooks/useApi'
 import { formatPrice } from '../../utils/format'
 import {
   TrendingUp, Package, AlertTriangle, FileText,
   DollarSign, ArrowUpRight, Inbox, RefreshCw,
-  ShoppingCart, Plus, Wifi, CheckCircle2, XCircle, Loader2
+  Loader2
 } from 'lucide-react'
 
 function loadInvoices() {
@@ -38,27 +37,9 @@ export default function AdminOverview() {
   const [products, setProducts]   = useState([])
   const [loading,  setLoading]    = useState(true)
 
-  // ─── Cart Registration State ──────────────────────────────────────────────
-  const [cartNumber,    setCartNumber]    = useState('')
-  const [rfidUid,       setRfidUid]       = useState('')
-  const [cartSaving,    setCartSaving]    = useState(false)
-  const [cartMsg,       setCartMsg]       = useState(null)   // {type:'success'|'error', text:''}
-  const [registeredCarts, setRegisteredCarts] = useState([])
-  const [cartsLoading,  setCartsLoading]  = useState(false)
-
-  const loadCarts = async () => {
-    setCartsLoading(true)
-    try {
-      const { data } = await api.get('/carts/')
-      setRegisteredCarts(data || [])
-    } catch { setRegisteredCarts([]) }
-    finally { setCartsLoading(false) }
-  }
-
   const reload = () => {
     setInvoices(loadInvoices())
     productApi.list({ limit: 200 }).then(({ data }) => setProducts(data)).catch(() => {}).finally(() => setLoading(false))
-    loadCarts()
   }
 
   useEffect(() => {
@@ -68,24 +49,6 @@ export default function AdminOverview() {
     return () => window.removeEventListener('storage', onStorage)
   }, [])
 
-  const handleRegisterCart = async () => {
-    if (!cartNumber.trim() || !rfidUid.trim()) {
-      setCartMsg({ type: 'error', text: isAr ? 'يرجى ملء جميع الحقول' : 'Please fill all fields' })
-      return
-    }
-    setCartSaving(true)
-    setCartMsg(null)
-    try {
-      await api.post(`/carts/register?cart_number=${encodeURIComponent(cartNumber.trim())}&rfid_uid=${encodeURIComponent(rfidUid.trim())}`)
-      setCartMsg({ type: 'success', text: isAr ? `✅ تم تسجيل ${cartNumber} بنجاح!` : `✅ ${cartNumber} registered!` })
-      setCartNumber('')
-      setRfidUid('')
-      loadCarts()
-    } catch (err) {
-      const detail = err.response?.data?.detail || (isAr ? 'فشل التسجيل' : 'Registration failed')
-      setCartMsg({ type: 'error', text: `❌ ${detail}` })
-    } finally { setCartSaving(false) }
-  }
 
   const completedInvoices = invoices.filter(i => i.status === 'completed')
   const pendingInvoices   = invoices.filter(i => i.status === 'pending')
@@ -174,135 +137,6 @@ export default function AdminOverview() {
           </div>
         </div>
       )}
-
-      {/* ══ Cart Registration ══════════════════════════════════════════════ */}
-      <div style={{ borderRadius: 18, background: 'var(--surface)', border: '1.5px solid var(--border)', overflow: 'hidden' }}>
-
-        {/* Header */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '14px 18px', borderBottom: '1px solid var(--border)', background: 'linear-gradient(135deg, #4f46e5, #7c3aed)' }}>
-          <div style={{ width: 34, height: 34, borderRadius: 10, background: 'rgba(255,255,255,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <ShoppingCart style={{ width: 18, height: 18, color: '#fff' }} />
-          </div>
-          <div>
-            <h3 style={{ fontWeight: 800, fontSize: 14, color: '#fff', margin: 0 }}>
-              {isAr ? 'تسجيل عربة جديدة' : 'Register New Cart'}
-            </h3>
-            <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.7)', margin: '2px 0 0' }}>
-              {isAr ? 'ربط RFID UID بعربة تسوق' : 'Link RFID UID to a shopping cart'}
-            </p>
-          </div>
-        </div>
-
-        <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 14 }}>
-
-          {/* How to get RFID */}
-          <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 12, padding: '10px 14px' }}>
-            <p style={{ fontSize: 12, fontWeight: 700, color: '#1d4ed8', margin: '0 0 4px' }}>
-              {isAr ? '📡 كيف تحصل على RFID UID؟' : '📡 How to get RFID UID?'}
-            </p>
-            <p style={{ fontSize: 11, color: '#1e40af', margin: 0, lineHeight: 1.6 }}>
-              {isAr
-                ? 'افتح Arduino IDE → Serial Monitor (115200 baud) → قرّب بطاقة RFID من RC522 → انسخ الـ UID الظاهر'
-                : 'Open Arduino IDE → Serial Monitor (115200 baud) → Bring RFID card near RC522 → Copy the UID shown'}
-            </p>
-            <p style={{ fontSize: 11, color: '#3b82f6', margin: '4px 0 0', fontFamily: 'monospace', fontWeight: 700 }}>
-              [RFID] Card detected: A1:B2:C3:D4
-            </p>
-          </div>
-
-          {/* Input fields */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <div>
-              <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text2)', display: 'block', marginBottom: 6 }}>
-                {isAr ? 'رقم العربة' : 'Cart Number'}
-              </label>
-              <input
-                value={cartNumber}
-                onChange={e => setCartNumber(e.target.value)}
-                placeholder="CART-001"
-                style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1.5px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontSize: 13, fontWeight: 600, outline: 'none', boxSizing: 'border-box', fontFamily: 'monospace' }}
-                onFocus={e => e.target.style.borderColor = '#4f46e5'}
-                onBlur={e => e.target.style.borderColor = 'var(--border)'}
-              />
-            </div>
-            <div>
-              <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text2)', display: 'block', marginBottom: 6 }}>
-                {isAr ? 'RFID UID (من Serial Monitor)' : 'RFID UID (from Serial Monitor)'}
-              </label>
-              <input
-                value={rfidUid}
-                onChange={e => setRfidUid(e.target.value)}
-                placeholder="A1:B2:C3:D4"
-                dir="ltr"
-                style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1.5px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontSize: 13, fontWeight: 700, outline: 'none', boxSizing: 'border-box', fontFamily: 'monospace', letterSpacing: '0.05em' }}
-                onFocus={e => e.target.style.borderColor = '#4f46e5'}
-                onBlur={e => e.target.style.borderColor = 'var(--border)'}
-              />
-            </div>
-          </div>
-
-          {/* Message */}
-          {cartMsg && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', borderRadius: 10, background: cartMsg.type === 'success' ? '#f0fdf4' : '#fef2f2', border: `1px solid ${cartMsg.type === 'success' ? '#86efac' : '#fca5a5'}` }}>
-              {cartMsg.type === 'success'
-                ? <CheckCircle2 style={{ width: 16, height: 16, color: '#16a34a', flexShrink: 0 }} />
-                : <XCircle     style={{ width: 16, height: 16, color: '#dc2626', flexShrink: 0 }} />
-              }
-              <p style={{ fontSize: 12, fontWeight: 700, margin: 0, color: cartMsg.type === 'success' ? '#15803d' : '#dc2626' }}>
-                {cartMsg.text}
-              </p>
-            </div>
-          )}
-
-          {/* Register button */}
-          <button
-            onClick={handleRegisterCart}
-            disabled={cartSaving || !cartNumber.trim() || !rfidUid.trim()}
-            style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '11px 0', borderRadius: 12, border: 'none', background: !cartNumber.trim() || !rfidUid.trim() ? 'var(--text3)' : '#4f46e5', color: '#fff', fontWeight: 800, fontSize: 14, cursor: !cartNumber.trim() || !rfidUid.trim() ? 'not-allowed' : 'pointer', opacity: !cartNumber.trim() || !rfidUid.trim() ? 0.5 : 1, transition: 'all 0.15s' }}
-            onMouseEnter={e => { if (cartNumber.trim() && rfidUid.trim()) e.currentTarget.style.background = '#3730a3' }}
-            onMouseLeave={e => { if (cartNumber.trim() && rfidUid.trim()) e.currentTarget.style.background = '#4f46e5' }}>
-            {cartSaving
-              ? <Loader2 style={{ width: 16, height: 16, animation: 'spin 1s linear infinite' }} />
-              : <Plus style={{ width: 16, height: 16 }} />
-            }
-            {isAr ? 'تسجيل العربة' : 'Register Cart'}
-          </button>
-
-          {/* Registered carts list */}
-          {cartsLoading ? (
-            <div style={{ display: 'flex', justifyContent: 'center', padding: '10px 0' }}>
-              <Loader2 style={{ width: 20, height: 20, color: 'var(--primary)', animation: 'spin 1s linear infinite' }} />
-            </div>
-          ) : registeredCarts.length > 0 && (
-            <div>
-              <p style={{ fontSize: 11, fontWeight: 700, color: 'var(--text3)', margin: '0 0 8px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                {isAr ? `العربات المسجّلة (${registeredCarts.length})` : `Registered Carts (${registeredCarts.length})`}
-              </p>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {registeredCarts.map(cart => (
-                  <div key={cart.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', borderRadius: 10, background: 'var(--surface2)', border: '1px solid var(--border)' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                      <div style={{ width: 32, height: 32, borderRadius: 8, background: '#ede9fe', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        <ShoppingCart style={{ width: 15, height: 15, color: '#7c3aed' }} />
-                      </div>
-                      <div>
-                        <p style={{ fontSize: 13, fontWeight: 800, color: 'var(--text)', margin: 0 }}>{cart.cart_number}</p>
-                        <p style={{ fontSize: 11, color: 'var(--text3)', margin: '2px 0 0', fontFamily: 'monospace', letterSpacing: '0.04em' }}>{cart.rfid_uid}</p>
-                      </div>
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <Wifi style={{ width: 13, height: 13, color: '#16a34a' }} />
-                      <span style={{ fontSize: 10, fontWeight: 700, color: '#15803d', background: '#dcfce7', padding: '2px 8px', borderRadius: 8 }}>
-                        {cart.status || 'ACTIVE'}
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
 
       <style>{`@keyframes spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }`}</style>
     </div>

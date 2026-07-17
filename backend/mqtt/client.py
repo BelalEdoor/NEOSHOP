@@ -20,6 +20,7 @@ Topics المستخدمة:
 import json
 import logging
 import asyncio
+import uuid
 from typing import Callable, Dict, List, Optional
 import paho.mqtt.client as mqtt
 from core.config import settings
@@ -66,7 +67,13 @@ class MQTTService:
     def setup(self, loop: asyncio.AbstractEventLoop):
         """يُستدعى مرة واحدة عند بدء FastAPI."""
         self._loop = loop
-        self._client = mqtt.Client(client_id="neoshop-backend", protocol=mqtt.MQTTv311)
+        # FIXED — كان client_id ثابت ("neoshop-backend"). لو صار فيه أكتر من
+        # عملية uvicorn شغالة بنفس الوقت (زومبي process من إعادة تشغيل سابقة
+        # ما اتقفلت صح، أو تشغيل مزدوج بالغلط)، البروكر بيفصل العميل الأقدم
+        # تلقائيًا كل ما عميل جديد يتصل بنفس الـ ID — وهاد بيسبب انقطاعات
+        # متقطعة وغامضة. صرنا نولّد ID فريد لكل عملية، بنفس فكرة الـ ESP32.
+        client_id = f"neoshop-backend-{uuid.uuid4().hex[:8]}"
+        self._client = mqtt.Client(client_id=client_id, protocol=mqtt.MQTTv311)
         self._client.on_connect    = self._on_connect
         self._client.on_disconnect = self._on_disconnect
         self._client.on_message    = self._on_message
@@ -74,10 +81,16 @@ class MQTTService:
         if settings.MQTT_USERNAME:
             self._client.username_pw_set(settings.MQTT_USERNAME, settings.MQTT_PASSWORD)
 
+        # FIXED — بدون هذا، لو انقطع الاتصال لأي سبب (شبكة، إعادة تشغيل
+        # البروكر، إلخ) العميل كان يضل مقطوع للأبد لحد إعادة تشغيل الباك
+        # اند يدويًا. هيك paho بيعيد المحاولة تلقائيًا بفواصل متزايدة
+        # (1s → 2s → ... → حتى 120s) بدل ما يستسلم.
+        self._client.reconnect_delay_set(min_delay=1, max_delay=120)
+
         try:
             self._client.connect(settings.MQTT_BROKER_HOST, settings.MQTT_BROKER_PORT, 60)
             self._client.loop_start()
-            log.info(f"[MQTT] Connecting to {settings.MQTT_BROKER_HOST}:{settings.MQTT_BROKER_PORT}")
+            log.info(f"[MQTT] Connecting to {settings.MQTT_BROKER_HOST}:{settings.MQTT_BROKER_PORT} as {client_id}")
         except Exception as e:
             log.warning(f"[MQTT] Could not connect: {e} — running without MQTT")
 
@@ -102,7 +115,10 @@ class MQTTService:
 
     def _on_disconnect(self, client, userdata, rc):
         self._connected = False
-        log.warning(f"[MQTT] Disconnected (rc={rc})")
+        if rc == 0:
+            log.info("[MQTT] Disconnected cleanly (shutdown)")
+        else:
+            log.warning(f"[MQTT] Unexpected disconnect (rc={rc}) — paho will auto-reconnect with backoff")
 
     def _on_message(self, client, userdata, msg):
         """معالجة الرسائل الواردة من ESP32 وRaspberry Pi."""

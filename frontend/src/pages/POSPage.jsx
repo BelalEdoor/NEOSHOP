@@ -210,8 +210,8 @@ function ProductSearchModal({ isAr, onClose, onAdd }) {
             placeholder={isAr ? 'ابحث عن منتج…' : 'Search products…'}
             style={{ flex:1,border:'none',background:'transparent',color:'var(--text)',fontSize:15,fontWeight:600,outline:'none' }}
           />
-          <button onClick={onClose} style={{ width:32,height:32,borderRadius:8,border:'none',background:'var(--surface2)',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',color:'var(--text3)' }}>
-            <X style={{ width:16,height:16 }} />
+          <button onClick={onClose} style={{ width:38,height:38,borderRadius:10,border:'none',background:'var(--surface2)',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',color:'var(--text3)' }}>
+            <X style={{ width:18,height:18 }} />
           </button>
         </div>
         <div style={{ flex:1,overflowY:'auto',padding:'8px 0' }}>
@@ -259,6 +259,7 @@ export default function POSPage() {
   const isAr      = i18n.language === 'ar'
   const user      = useAuthStore(s => s.user)
   const token     = useAuthStore(s => s.token)
+  const logout    = useAuthStore(s => s.logout)
   const navigate  = useNavigate()
 
   // ─── Session State ─────────────────────────────────────────────────────────
@@ -382,6 +383,16 @@ export default function POSPage() {
               status: 'COMPLETED',
             })
             toast.success(isAr ? '✅ تم الدفع بنجاح!' : '✅ Payment completed!')
+            // تسجيل خروج تلقائي بعد إظهار رسالة "تم الدفع بنجاح" لعدة ثواني،
+            // عشان العميل يشوف تأكيد الدفع قبل ما تُقفل الجلسة وتُعاد الشاشة
+            // لصفحة تسجيل الدخول (جاهزة للعميل التالي).
+            setTimeout(() => {
+              setShowPayment(false)
+              clearSession()
+              clearPayment()
+              logout()
+              navigate('/login')
+            }, 5000)
             break
           case 'theft_alert':
             toast.error(
@@ -606,7 +617,7 @@ export default function POSPage() {
         </div>
 
         {/* Table header */}
-        <div style={{ display:'grid', gridTemplateColumns:'26px 1fr 90px 110px 80px 34px', gap:4, padding:'7px 14px', background:'var(--surface2)', borderBottom:'2px solid var(--border)', fontSize:10, fontWeight:800, color:'var(--text3)', textTransform:'uppercase', letterSpacing:'0.05em', flexShrink:0 }}>
+        <div style={{ display:'grid', gridTemplateColumns:'28px 1fr 90px 130px 90px 42px', gap:6, padding:'8px 14px', background:'var(--surface2)', borderBottom:'2px solid var(--border)', fontSize:10, fontWeight:800, color:'var(--text3)', textTransform:'uppercase', letterSpacing:'0.05em', flexShrink:0 }}>
           <span>#</span>
           <span>{isAr ? 'المنتج' : 'Product'}</span>
           <span style={{ textAlign:'center' }}>{isAr ? 'السعر' : 'Price'}</span>
@@ -631,7 +642,7 @@ export default function POSPage() {
             </div>
           ) : (
             cartItems.map((item, idx) => (
-              <div key={item.id} style={{ display:'grid', gridTemplateColumns:'26px 1fr 90px 110px 80px 34px', gap:4, padding:'9px 14px', alignItems:'center', borderBottom:'1px solid var(--border)', background:idx%2===0?'var(--surface)':'rgba(0,0,0,0.015)', transition:'background 0.1s' }}
+              <div key={item.id} style={{ display:'grid', gridTemplateColumns:'28px 1fr 90px 130px 90px 42px', gap:6, padding:'11px 14px', alignItems:'center', borderBottom:'1px solid var(--border)', background:idx%2===0?'var(--surface)':'rgba(0,0,0,0.015)', transition:'background 0.1s' }}
                 onMouseEnter={e => e.currentTarget.style.background='var(--surface2)'}
                 onMouseLeave={e => e.currentTarget.style.background=idx%2===0?'var(--surface)':'rgba(0,0,0,0.015)'}>
                 <span style={{ fontSize:10, fontWeight:700, color:'var(--text3)' }}>{idx+1}</span>
@@ -641,23 +652,23 @@ export default function POSPage() {
                 <span style={{ textAlign:'center', fontSize:12, fontWeight:600, color:'var(--text3)' }}>
                   ${(item.unit_price||item.product?.price||0).toFixed(2)}
                 </span>
-                <div style={{ display:'flex', alignItems:'center', justifyContent:'center', gap:4 }}>
-                  <button onClick={() => handleUpdateQty(item,-1)} disabled={!isSessionActive} style={{ width:24, height:24, borderRadius:6, border:'1px solid var(--border)', background:'var(--surface)', cursor:isSessionActive?'pointer':'not-allowed', display:'flex', alignItems:'center', justifyContent:'center', opacity:isSessionActive?1:0.4 }}>
-                    <Minus style={{ width:10, height:10, color:'var(--text2)' }} />
+                <div style={{ display:'flex', alignItems:'center', justifyContent:'center', gap:8 }}>
+                  <button onClick={() => handleUpdateQty(item,-1)} disabled={!isSessionActive} style={{ width:32, height:32, borderRadius:8, border:'1px solid var(--border)', background:'var(--surface)', cursor:isSessionActive?'pointer':'not-allowed', display:'flex', alignItems:'center', justifyContent:'center', opacity:isSessionActive?1:0.4 }}>
+                    <Minus style={{ width:14, height:14, color:'var(--text2)' }} />
                   </button>
                   <span style={{ width:26, textAlign:'center', fontWeight:800, fontSize:14, color:'var(--text)' }}>{item.quantity}</span>
-                  <button onClick={() => handleUpdateQty(item,1)} disabled={!isSessionActive} style={{ width:24, height:24, borderRadius:6, border:'1px solid var(--border)', background:'var(--surface)', cursor:isSessionActive?'pointer':'not-allowed', display:'flex', alignItems:'center', justifyContent:'center', opacity:isSessionActive?1:0.4 }}>
-                    <Plus style={{ width:10, height:10, color:'var(--text2)' }} />
+                  <button onClick={() => handleUpdateQty(item,1)} disabled={!isSessionActive} style={{ width:32, height:32, borderRadius:8, border:'1px solid var(--border)', background:'var(--surface)', cursor:isSessionActive?'pointer':'not-allowed', display:'flex', alignItems:'center', justifyContent:'center', opacity:isSessionActive?1:0.4 }}>
+                    <Plus style={{ width:14, height:14, color:'var(--text2)' }} />
                   </button>
                 </div>
                 <span style={{ textAlign:'end', fontWeight:800, fontSize:14, color:'var(--primary)' }}>
                   ${((item.unit_price||item.product?.price||0)*item.quantity).toFixed(2)}
                 </span>
                 <button onClick={() => handleRemoveItem(item)} disabled={!isSessionActive}
-                  style={{ width:28, height:28, borderRadius:8, border:'none', background:'transparent', cursor:isSessionActive?'pointer':'not-allowed', display:'flex', alignItems:'center', justifyContent:'center', color:'var(--text3)', transition:'color 0.1s', opacity:isSessionActive?1:0.4 }}
+                  style={{ width:34, height:34, borderRadius:9, border:'none', background:'transparent', cursor:isSessionActive?'pointer':'not-allowed', display:'flex', alignItems:'center', justifyContent:'center', color:'var(--text3)', transition:'color 0.1s', opacity:isSessionActive?1:0.4 }}
                   onMouseEnter={e => { if(isSessionActive) e.currentTarget.style.color='#dc2626' }}
                   onMouseLeave={e => e.currentTarget.style.color='var(--text3)'}>
-                  <X style={{ width:15, height:15 }} />
+                  <X style={{ width:18, height:18 }} />
                 </button>
               </div>
             ))
@@ -710,21 +721,21 @@ export default function POSPage() {
           <button
             onClick={() => setShowSearch(true)}
             disabled={!isSessionActive}
-            style={{ display:'flex', alignItems:'center', gap:6, padding:'11px 16px', borderRadius:12, border:'2px solid var(--border)', background:'var(--surface2)', color:'var(--text)', fontWeight:700, fontSize:13, cursor:isSessionActive?'pointer':'not-allowed', whiteSpace:'nowrap', flexShrink:0, opacity:isSessionActive?1:0.5 }}>
-            <Search style={{ width:15, height:15 }} />
+            style={{ display:'flex', alignItems:'center', gap:7, padding:'13px 18px', borderRadius:12, border:'2px solid var(--border)', background:'var(--surface2)', color:'var(--text)', fontWeight:700, fontSize:14, cursor:isSessionActive?'pointer':'not-allowed', whiteSpace:'nowrap', flexShrink:0, opacity:isSessionActive?1:0.5 }}>
+            <Search style={{ width:17, height:17 }} />
             {isAr ? 'بحث' : 'Search'}
           </button>
           <button
             onClick={() => handleBarcodeScan(barcodeVal)}
             disabled={!barcodeVal.trim() || processing || !isSessionActive}
-            style={{ padding:'11px 20px', borderRadius:12, border:'none', background:'var(--primary)', color:'#fff', fontWeight:800, fontSize:13, cursor:'pointer', opacity:!barcodeVal.trim()||processing||!isSessionActive?0.45:1, whiteSpace:'nowrap', flexShrink:0 }}>
+            style={{ padding:'13px 22px', borderRadius:12, border:'none', background:'var(--primary)', color:'#fff', fontWeight:800, fontSize:14, cursor:'pointer', opacity:!barcodeVal.trim()||processing||!isSessionActive?0.45:1, whiteSpace:'nowrap', flexShrink:0 }}>
             {isAr ? 'إضافة ↵' : 'Add ↵'}
           </button>
         </div>
       </div>
 
       {/* ══ BOTTOM BAR ═══════════════════════════════════════════════════════ */}
-      <div style={{ gridColumn:'1/2', gridRow:'2/3', display:'flex', alignItems:'center', justifyContent:'space-between', padding:'0 18px', background:'var(--surface)', borderTop:'2px solid var(--border)', gap:14 }}>
+      <div style={{ gridColumn:'1/2', gridRow:'2/3', display:'flex', alignItems:'center', justifyContent:'space-between', padding:'0 18px', background:'var(--surface)', borderTop:'2px solid var(--border)', gap:16 }}>
         <div style={{ display:'flex', alignItems:'baseline', gap:8 }}>
           <span style={{ fontSize:12, color:'var(--text3)', fontWeight:600 }}>{isAr ? 'الإجمالي' : 'Total'}</span>
           <span style={{ fontSize:30, fontWeight:900, color:'#16a34a', lineHeight:1 }}>${cartTotal.toFixed(2)}</span>
@@ -733,18 +744,18 @@ export default function POSPage() {
 
         {/* Offers */}
         <button onClick={() => navigate('/offers')}
-          style={{ display:'flex', alignItems:'center', gap:7, padding:'10px 20px', borderRadius:11, border:'none', background:'#f59e0b', color:'#fff', fontWeight:800, fontSize:13, cursor:'pointer', transition:'all 0.15s', boxShadow:'0 3px 12px rgba(245,158,11,0.3)' }}
+          style={{ display:'flex', alignItems:'center', gap:8, padding:'13px 24px', borderRadius:12, border:'none', background:'#f59e0b', color:'#fff', fontWeight:800, fontSize:14, cursor:'pointer', transition:'all 0.15s', boxShadow:'0 3px 12px rgba(245,158,11,0.3)' }}
           onMouseEnter={e => { e.currentTarget.style.background='#d97706'; e.currentTarget.style.transform='translateY(-1px)' }}
           onMouseLeave={e => { e.currentTarget.style.background='#f59e0b'; e.currentTarget.style.transform='translateY(0)' }}>
-          <Tag style={{ width:16, height:16 }} />
+          <Tag style={{ width:18, height:18 }} />
           {isAr ? 'العروضات' : 'Offers'}
         </button>
 
         {/* Pending Payment indicator */}
         {isPendingPayment && (
           <button onClick={() => setShowPayment(true)}
-            style={{ display:'flex', alignItems:'center', gap:8, padding:'10px 20px', borderRadius:11, border:'2px solid #4f46e5', background:'#eef2ff', color:'#4f46e5', fontWeight:800, fontSize:13, cursor:'pointer', animation:'pulse 2s infinite' }}>
-            <CreditCard style={{ width:16, height:16 }} />
+            style={{ display:'flex', alignItems:'center', gap:9, padding:'13px 24px', borderRadius:12, border:'2px solid #4f46e5', background:'#eef2ff', color:'#4f46e5', fontWeight:800, fontSize:14, cursor:'pointer', animation:'pulse 2s infinite' }}>
+            <CreditCard style={{ width:18, height:18 }} />
             {isAr ? 'متابعة الدفع' : 'Payment Status'}
           </button>
         )}
@@ -752,10 +763,10 @@ export default function POSPage() {
         {/* Complete purchase / Finish Shopping */}
         {isSessionActive && (
           <button onClick={handleFinishShopping} disabled={cartItems.length===0||saving}
-            style={{ display:'flex', alignItems:'center', gap:8, padding:'10px 28px', borderRadius:11, border:'none', background:cartItems.length===0?'var(--text3)':'#16a34a', color:'#fff', fontWeight:800, fontSize:14, cursor:cartItems.length===0?'not-allowed':'pointer', opacity:cartItems.length===0?0.45:1, transition:'all 0.15s', boxShadow:cartItems.length>0?'0 4px 16px rgba(22,163,74,0.35)':'none', minWidth:190 }}
+            style={{ display:'flex', alignItems:'center', gap:9, padding:'13px 30px', borderRadius:12, border:'none', background:cartItems.length===0?'var(--text3)':'#16a34a', color:'#fff', fontWeight:800, fontSize:15, cursor:cartItems.length===0?'not-allowed':'pointer', opacity:cartItems.length===0?0.45:1, transition:'all 0.15s', boxShadow:cartItems.length>0?'0 4px 16px rgba(22,163,74,0.35)':'none', minWidth:200 }}
             onMouseEnter={e => { if(cartItems.length>0){ e.currentTarget.style.background='#15803d'; e.currentTarget.style.transform='translateY(-1px)' } }}
             onMouseLeave={e => { e.currentTarget.style.background=cartItems.length===0?'var(--text3)':'#16a34a'; e.currentTarget.style.transform='translateY(0)' }}>
-            {saving ? <Loader2 style={{ width:17,height:17,animation:'spin 1s linear infinite' }} /> : <Zap style={{ width:17,height:17 }} />}
+            {saving ? <Loader2 style={{ width:18,height:18,animation:'spin 1s linear infinite' }} /> : <Zap style={{ width:18,height:18 }} />}
             {isAr ? 'إنهاء التسوق' : 'Finish Shopping'}
           </button>
         )}

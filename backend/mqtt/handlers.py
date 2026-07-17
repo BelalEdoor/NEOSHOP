@@ -266,6 +266,11 @@ async def handle_payment_complete(topic: str, payload: dict):
         payment.amount_inserted  = amount_inserted
         payment.change_returned  = change_returned
         payment.pending_change   = 0.0  # لو كانت الدفعة متوقفة بانتظار تعبئة، انتهى الانتظار
+        # شبكة أمان: لو كانت الدفعة مرّت بمرحلة AWAITING_REFILL ولسا ما
+        # تسجّل وقت الحل (مثلاً الجهاز كمّل من تلقاء نفسه بدون ما يمر
+        # المتجر بزر التأكيد)، سجّله هون عشان السجل ما يضل "معلّق" للأبد.
+        if payment.refill_requested_at and not payment.refill_resolved_at:
+            payment.refill_resolved_at = datetime.now(timezone.utc)
         payment.completed_at    = datetime.now(timezone.utc)
 
         # تحديث الفاتورة
@@ -365,6 +370,11 @@ async def handle_refill_needed(topic: str, payload: dict):
 
         payment.status         = PaymentStatus.AWAITING_REFILL
         payment.pending_change = remaining_change
+        payment.refill_amount  = remaining_change
+        # نحدّث وقت الطلب في كل مرة (حتى لو كانت هاي إعادة طلب بعد تعبئة
+        # ناقصة) — عشان السجل يعكس آخر مرة انطلب فيها التنبيه فعلياً.
+        payment.refill_requested_at = datetime.now(timezone.utc)
+        payment.refill_resolved_at  = None
         payment.esp32_device_id = device_id or payment.esp32_device_id
 
         invoice = db.query(Invoice).filter(Invoice.id == payment.invoice_id).first()

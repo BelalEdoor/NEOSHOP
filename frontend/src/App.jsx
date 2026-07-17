@@ -11,8 +11,11 @@ import ProfilePage from './pages/ProfilePage'
 import MapPage from './pages/MapPage'
 import OffersPage from './pages/OffersPage'
 import Layout from './components/ui/Layout'
+import SplashLogo from './components/ui/SplashLogo'
 import AdminLayout from './pages/admin/AdminLayout'
 import AdminOverview from './pages/admin/AdminOverview'
+import AdminNotifications from './pages/admin/AdminNotifications'
+import AdminMap from './pages/admin/AdminMap'
 import AdminProducts from './pages/admin/AdminProducts'
 import AdminCarts from './pages/admin/AdminCarts'
 import AdminInvoices from './pages/admin/AdminInvoices'
@@ -40,6 +43,7 @@ export default function App() {
 
   return (
     <BrowserRouter>
+      <SplashLogo />
       <Toaster position="top-center" toastOptions={{ duration: 3500, style: { fontFamily: 'Cairo, sans-serif' } }} />
       <Routes>
         <Route path="/login" element={<LoginPage />} />
@@ -72,6 +76,8 @@ export default function App() {
           }
         >
           <Route index element={<AdminOverview />} />
+          <Route path="notifications" element={<AdminNotifications />} />
+          <Route path="map" element={<AdminMap />} />
           <Route path="products"  element={<AdminProducts />} />
           <Route path="carts"     element={<AdminCarts />} />
           <Route path="invoices"  element={<AdminInvoices />} />

@@ -42,6 +42,13 @@ class Payment(Base):
     # NEW — المبلغ (NIS) اللي لسا الجهاز لازم يرجعه للعميل، معبّى فقط وقت
     # AWAITING_REFILL. صفر يعني ما في شي معلّق.
     pending_change = Column(Float, default=0.0)
+    # NEW — سجل تاريخي لحدث نفاد الأنابيب (يبقى محفوظ حتى بعد ما تُحل
+    # المشكلة، عشان تُبنى عليه صفحة "الإشعارات / السجل" بلوحة الأدمن).
+    # refill_amount يحفظ آخر مبلغ طُلب تعبئته (ما بيتصفر بعد الحل، بعكس
+    # pending_change اللي بيرجع صفر فور اكتمال الدفعة).
+    refill_requested_at = Column(DateTime(timezone=True), nullable=True)
+    refill_resolved_at  = Column(DateTime(timezone=True), nullable=True)
+    refill_amount       = Column(Float, nullable=True)
     method         = Column(Enum(PaymentMethod), default=PaymentMethod.CASH)
 
     # ─── Status ───────────────────────────────────────────────────────────

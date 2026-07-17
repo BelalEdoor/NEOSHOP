@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import toast from 'react-hot-toast'
@@ -7,7 +7,7 @@ import api from '../hooks/useApi'
 import { useAuthStore, ADMIN_EMAILS } from '../store'
 import {
   ShoppingBag, Mail, Lock, Loader2, Globe,
-  UserX, Eye, EyeOff, ShieldAlert
+  UserX, Eye, EyeOff
 } from 'lucide-react'
 import i18n from '../i18n/index'
 
@@ -15,6 +15,10 @@ export default function LoginPage() {
   const navigate = useNavigate()
   const setAuth  = useAuthStore((s) => s.setAuth)
   const isAr     = i18n.language === 'ar'
+
+  // جزء من تجربة العميل الفاتحة دائماً — راجع ملاحظة components/ui/Layout.jsx
+  useEffect(() => { document.documentElement.classList.remove('dark') }, [])
+
 
   const [form,     setForm]     = useState({ email: '', password: '' })
   const [loading,  setLoading]  = useState(false)
@@ -193,7 +197,7 @@ export default function LoginPage() {
               className="btn-primary w-full flex items-center justify-center gap-2"
               disabled={loading}>
               {loading && <Loader2 className="w-4 h-4 animate-spin" />}
-              {isAr ? 'تسجيل الدخول وبدء التسوق' : 'Sign in & Start Shopping'}
+              {isAr ? 'تسجيل الدخول' : 'Login'}
             </button>
           </form>
 
@@ -203,16 +207,6 @@ export default function LoginPage() {
               {isAr ? 'سجّل الآن' : 'Sign Up'}
             </Link>
           </p>
-
-          <div className="mt-4 rounded-xl p-3 flex items-center gap-3"
-            style={{ background: 'var(--surface2)', border: '1px solid var(--border)' }}>
-            <ShieldAlert className="w-4 h-4 flex-shrink-0" style={{ color: 'var(--primary)' }} />
-            <p className="text-xs" style={{ color: 'var(--text3)' }}>
-              {isAr
-                ? 'حساب صاحب المتجر: admin@neoshop.com / admin1234'
-                : 'Store owner: admin@neoshop.com / admin1234'}
-            </p>
-          </div>
         </div>
       </div>
     </div>
