@@ -156,3 +156,53 @@ async def websocket_pos(websocket: WebSocket, session_id: int):
                 pass
     except WebSocketDisconnect:
         manager.disconnect_from_session(websocket, session_id)
+
+
+@router.websocket("/ws/camera/{cart_rfid}")
+async def websocket_camera(websocket: WebSocket, cart_rfid: str):
+    """
+    Raspberry Pi يتصل هنا ويبعث إطارات JPEG (binary frames) من الكاميرا
+    المثبَّتة على العربة، إطاراً بعد إطار، بشكل مستمر طوال جلسة التسوق.
+
+    لماذا cart_rfid وليس session_id؟
+      جهاز الراسبيري باي مثبَّت فيزيائياً على عربة واحدة بشكل دائم
+      (هويته الثابتة هي RFID العربة)، بينما session_id يتغيّر مع كل عميل
+      جديد يستخدم نفس العربة. البحث عن الجلسة النشطة يتم هنا في كل مرة
+      تصل فيها مجموعة إطارات، فلا يحتاج الراسبيري باي معرفة session_id
+      أو إعادة الاتصال عند تبديل العميل.
+
+    كل إطار يُمرَّر إلى theft_service.analyze_frame()، والذي بدوره يستدعي
+    تلقائياً handle_theft_alert() (المسجَّلة عبر set_theft_callback في
+    main.py) عند رصد أي سلوك مشبوه — لا حاجة لأي منطق إضافي هنا.
+    """
+    await websocket.accept()
+    log.info(f"[WS] Camera connected for cart_rfid={cart_rfid}")
+
+    from core.database import SessionLocal
+    from models.session import ShoppingSession
+    from models.cart import CartStatus
+    from cv.theft_detection import theft_service
+
+    try:
+        while True:
+            frame_bytes = await websocket.receive_bytes()
+
+            db = SessionLocal()
+            try:
+                session = db.query(ShoppingSession).filter(
+                    ShoppingSession.cart_rfid == cart_rfid,
+                    ShoppingSession.status == CartStatus.ACTIVE,
+                ).order_by(ShoppingSession.id.desc()).first()
+            finally:
+                db.close()
+
+            if not session:
+                # ما في جلسة تسوق نشطة مرتبطة بهذه العربة حالياً — تجاهل الإطار
+                continue
+
+            await theft_service.analyze_frame(frame_bytes, session.id)
+
+    except WebSocketDisconnect:
+        log.info(f"[WS] Camera disconnected for cart_rfid={cart_rfid}")
+    except Exception as e:
+        log.error(f"[WS] Camera stream error ({cart_rfid}): {e}")

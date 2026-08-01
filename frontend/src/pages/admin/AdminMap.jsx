@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useSearchParams } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import {
  Loader2, Store, Radio, ShoppingCart, ArrowUp, ArrowDown,
@@ -66,6 +67,14 @@ export default function AdminMap() {
  const isAr = i18n.language === 'ar'
  const { carts, loading } = useAllCartPositions()
  const [monitorCartId, setMonitorCartId] = useState(null)
+ const [searchParams] = useSearchParams()
+
+ // إتاحة الانتقال المباشر لمراقبة عربة معيّنة من زر "الانتقال للخريطة"
+ // بتنبيهات الأمن (AdminNotifications.jsx / toast السرقة) عبر ?cart=<id>
+ useEffect(() => {
+   const cartParam = searchParams.get('cart')
+   if (cartParam) setMonitorCartId(parseInt(cartParam, 10))
+ }, [searchParams])
 
  const activeCarts = carts.filter(c => c.in_aisle)
  const cartsIn = (aisleId, atBottom) =>

@@ -1,0 +1,10 @@
+Genuine-note reconstruction error stats (n_train=170, n_val=30):
+  val:   mean=0.002502 std=0.000246 min=0.002356 max=0.003806
+  train: mean=0.002574 max=0.004595
+
+Calibrated anomaly threshold (max genuine error * 1.15): 0.005284
+Any new UV image with reconstruction error ABOVE this is flagged 'suspicious'.
+
+CAVEAT: threshold calibrated only on genuine notes (no counterfeit samples
+were available). Validate against real counterfeit/altered notes before
+trusting this in production, and retune THRESHOLD_MARGIN if needed.

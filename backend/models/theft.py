@@ -16,6 +16,9 @@ class TheftAlertType(str, enum.Enum):
     ITEM_CONCEALED     = "ITEM_CONCEALED"       # إخفاء منتج
     MULTIPLE_ITEMS     = "MULTIPLE_ITEMS"       # أخذ عدة منتجات دفعة واحدة
     BRAKE_ACTIVATED    = "BRAKE_ACTIVATED"      # تفعيل الفرامل
+    # ─── من محرّك cv/theft_logic.py (اكتشاف اليد + المنطقتين) ─────────────
+    PROLONGED_HOLDING  = "PROLONGED_HOLDING"    # منتج بيد العميل بمنطقة المسح دون مسح لفترة طويلة
+    UNSCANNED_IN_CART  = "UNSCANNED_IN_CART"    # منتج استقرّ داخل السلة دون أي مسح مسجَّل
 
 
 class TheftLog(Base):

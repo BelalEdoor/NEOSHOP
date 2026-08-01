@@ -14,10 +14,11 @@
  */
 import React, { useState, useEffect, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
-import { Coins, CheckCircle2, Loader2, Clock, History, RefreshCw, AlertCircle, Wrench, Trash2 } from 'lucide-react'
-import { paymentApi } from '../../hooks/useApi'
-import { useRefillStore } from '../../store'
+import { Coins, CheckCircle2, Loader2, Clock, History, RefreshCw, AlertCircle, Wrench, Trash2, ShieldAlert, MapPin, Lock } from 'lucide-react'
+import { paymentApi, theftApi } from '../../hooks/useApi'
+import { useRefillStore, useTheftStore } from '../../store'
 
 function formatDateTime(iso, isAr) {
   if (!iso) return '—'
@@ -31,9 +32,27 @@ function formatDateTime(iso, isAr) {
 export default function AdminNotifications() {
   const { t, i18n } = useTranslation()
   const isAr = i18n.language === 'ar'
+  const navigate = useNavigate()
 
   const alerts            = useRefillStore(s => s.pendingAlerts)
   const removePendingAlert = useRefillStore(s => s.removePendingAlert)
+
+  const theftAlerts          = useTheftStore(s => s.activeAlerts)
+  const removeTheftBySession = useTheftStore(s => s.removeAlertBySession)
+  const [resolvingId, setResolvingId] = useState(null)
+
+  const handleResolveTheft = async (alert) => {
+    setResolvingId(alert.alert_id)
+    try {
+      if (alert.alert_id) await theftApi.resolveAlert(alert.alert_id)
+      removeTheftBySession(alert.session_id)
+      toast.success(isAr ? '✅ تم إغلاق التنبيه' : '✅ Alert resolved')
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || (isAr ? 'تعذّر إغلاق التنبيه' : 'Could not resolve alert'))
+    } finally {
+      setResolvingId(null)
+    }
+  }
 
   const [history, setHistory]           = useState([])
   const [historyLoading, setHistoryLoading] = useState(true)
@@ -114,6 +133,75 @@ export default function AdminNotifications() {
           {t('notificationsSubtitle')}
         </p>
       </div>
+
+      {/* ── تنبيهات الأمن (سرقة / منتج غير مسحوب) ──────────────────────────── */}
+      <section>
+        <h2 className="text-sm font-bold mb-3 flex items-center gap-2" style={{ color: 'var(--text2)' }}>
+          <ShieldAlert className="w-4 h-4" style={{ color: '#dc2626' }} />
+          {isAr ? 'تنبيهات الأمن' : 'Security Alerts'}
+          {theftAlerts.length > 0 && (
+            <span className="px-2 py-0.5 rounded-full text-[11px] font-bold text-white" style={{ background: '#dc2626' }}>
+              {theftAlerts.length}
+            </span>
+          )}
+        </h2>
+
+        {theftAlerts.length === 0 ? (
+          <div className="card text-sm py-8 text-center" style={{ color: 'var(--text3)' }}>
+            {isAr ? 'لا توجد تنبيهات أمن نشطة' : 'No active security alerts'}
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {theftAlerts.map(alert => (
+              <div key={alert.session_id} className="card"
+                style={{ borderInlineStart: `4px solid ${alert.brake_activated ? '#7f1d1d' : '#dc2626'}` }}>
+                <div className="flex items-center justify-between gap-4 flex-wrap">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
+                      style={{ background: alert.brake_activated ? '#fee2e2' : '#fff7ed' }}>
+                      {alert.brake_activated
+                        ? <Lock className="w-5 h-5" style={{ color: '#7f1d1d' }} />
+                        : <ShieldAlert className="w-5 h-5" style={{ color: '#dc2626' }} />}
+                    </div>
+                    <div>
+                      <p className="font-bold text-sm" style={{ color: 'var(--text)' }}>
+                        {alert.brake_activated
+                          ? (isAr ? 'تم تفعيل فرامل العربة' : 'Cart brake activated')
+                          : (isAr ? 'منتج غير مسحوب داخل السلة' : 'Unscanned item in cart')}
+                      </p>
+                      <p className="text-xs mt-0.5" style={{ color: 'var(--text3)' }}>
+                        {isAr ? 'عربة' : 'Cart'} #{alert.cart_id ?? '—'} · {isAr ? 'جلسة' : 'session'} #{alert.session_id}
+                        {alert.object_class && <span> · {alert.object_class}</span>}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => navigate(`/admin/map?cart=${alert.cart_id ?? ''}`)}
+                      className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold text-white transition-all"
+                      style={{ background: '#1e40af' }}
+                    >
+                      <MapPin className="w-4 h-4" />
+                      {isAr ? 'الانتقال للخريطة' : 'Go to map'}
+                    </button>
+                    <button
+                      onClick={() => handleResolveTheft(alert)}
+                      disabled={resolvingId === alert.alert_id}
+                      className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold text-white transition-all"
+                      style={{ background: resolvingId === alert.alert_id ? '#86efac' : '#16a34a' }}
+                    >
+                      {resolvingId === alert.alert_id
+                        ? <Loader2 className="w-4 h-4 animate-spin" />
+                        : <CheckCircle2 className="w-4 h-4" />}
+                      {isAr ? 'إغلاق' : 'Resolve'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
 
       {/* ── تنبيهات نشطة ─────────────────────────────────────────────────────── */}
       <section>

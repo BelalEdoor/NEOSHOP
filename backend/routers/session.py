@@ -28,6 +28,7 @@ from models.user import User
 from schemas import SessionOut, CartItemOut, InvoiceOut, FinishShoppingRequest
 from mqtt.client import mqtt_service, Topics
 from websocket_router import manager as ws_manager
+from cv.theft_detection import theft_service
 
 router = APIRouter()
 
@@ -210,6 +211,10 @@ async def scan_product(
     # إعادة حساب المجموع
     new_total = _recalculate_total(session_id, db)
 
+    # إعلام محرّك كشف السرقة (cv/theft_logic.py) أن هذا المنتج مُسِح شرعاً —
+    # يُلغي أي شاشة تحذير حمراء معلّقة على نقطة البيع ومهلة تفعيل الفرامل.
+    theft_service.register_scanned_product(session_id, product.id)
+
     # WebSocket update → Frontend
     await ws_manager.broadcast_to_session(session_id, {
         "type": "cart_update",
@@ -353,6 +358,9 @@ async def finish_shopping(
     session.ended_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(invoice)
+
+    # تنظيف حالة تتبّع الكاميرا لهذه الجلسة (لا داعي لمتابعتها بعد انتهاء التسوق)
+    theft_service.clear_session(session_id)
 
     audit("session_finish", current_user.id, ip,
           f"Session {session_id} finished — invoice {invoice_code}")

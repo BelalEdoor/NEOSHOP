@@ -41,6 +41,8 @@ class TheftAlertTypeEnum(str, Enum):
     ITEM_CONCEALED      = "ITEM_CONCEALED"
     MULTIPLE_ITEMS      = "MULTIPLE_ITEMS"
     BRAKE_ACTIVATED     = "BRAKE_ACTIVATED"
+    PROLONGED_HOLDING   = "PROLONGED_HOLDING"
+    UNSCANNED_IN_CART   = "UNSCANNED_IN_CART"
 
 
 # ─── Auth ──────────────────────────────────────────────────────────────────────
@@ -86,6 +88,39 @@ class UserUpdate(BaseModel):
     recommendations_enabled: Optional[bool] = None
     onboarding_completed:    Optional[bool] = None
     other_health_notes: Optional[str] = None
+
+
+# ─── Admin — Customer Accounts (صفحة "حسابات العملاء" بالسايدبار) ──────────────
+class AdminCustomerOut(UserOut):
+    """نفس UserOut + إحصاءات سريعة تُعرض بجدول لوحة الأدمن."""
+    total_orders: int   = 0
+    total_spent:  float = 0.0
+
+class AdminCustomerUpdate(BaseModel):
+    """تعديل بيانات عميل من لوحة الأدمن — كل الحقول اختيارية (تحديث جزئي)."""
+    name:      Optional[str]       = None
+    email:     Optional[EmailStr]  = None
+    age:       Optional[int]       = None
+    gender:    Optional[str]       = None
+    allergies: Optional[List[str]] = None
+    other_health_notes: Optional[str] = None
+    is_active: Optional[bool]      = None
+
+class AdminPasswordReset(BaseModel):
+    """
+    تعيين كلمة مرور جديدة لعميل من لوحة الأدمن.
+    ملاحظة أمان: كلمات المرور تُخزَّن مُجزَّأة (bcrypt) ولا يمكن استرجاع أو
+    عرض القيمة الأصلية أبداً — لذلك لوحة الأدمن توفر "تعيين كلمة مرور جديدة"
+    فقط، وليس عرض/تعديل الكلمة الحالية.
+    """
+    new_password: str
+
+    @field_validator("new_password")
+    @classmethod
+    def _min_len(cls, v):
+        if len(v) < 6:
+            raise ValueError("Password must be at least 6 characters")
+        return v
 
 
 

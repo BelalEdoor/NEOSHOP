@@ -1,13 +1,13 @@
 import React, { useState, useEffect } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { useAuthStore, useThemeStore, useRefillStore } from '../../store'
+import { useAuthStore, useThemeStore, useRefillStore, useTheftStore } from '../../store'
 import i18n from '../../i18n/index'
 import RefillNotifications from '../../components/admin/RefillNotifications'
 import {
   LayoutDashboard, Package, FileText, Users, Truck, BarChart3,
   ChevronLeft, ChevronRight, ShieldAlert, LogOut, Sun, Moon,
-  Shield, Menu, Globe, ShoppingCart, Bell, Map as MapIcon
+  Shield, Menu, Globe, ShoppingCart, Bell, Map as MapIcon, Contact
 } from 'lucide-react'
 
 export default function AdminLayout() {
@@ -15,6 +15,8 @@ export default function AdminLayout() {
   const { user, logout } = useAuthStore()
   const { dark, toggleDark } = useThemeStore()
   const pendingRefillCount = useRefillStore(s => s.pendingAlerts.length)
+  const activeTheftCount   = useTheftStore(s => s.activeAlerts.length)
+  const notificationsBadge = pendingRefillCount + activeTheftCount
   const navigate = useNavigate()
   const [collapsed, setCollapsed] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -29,11 +31,12 @@ export default function AdminLayout() {
   const NAV_ITEMS = [
     { to: '/admin',            icon: LayoutDashboard, labelKey: 'adminDashboard', end: true },
     { to: '/admin/map',        icon: MapIcon,         labelKey: 'liveMapTitle'   },
-    { to: '/admin/notifications', icon: Bell,         labelKey: 'notificationsTitle', badge: pendingRefillCount },
+    { to: '/admin/notifications', icon: Bell,         labelKey: 'notificationsTitle', badge: notificationsBadge },
     { to: '/admin/products',   icon: Package,         labelKey: 'productsTitle'  },
     { to: '/admin/carts',      icon: ShoppingCart,    labelKey: 'cartsTitle'     },
     { to: '/admin/invoices',   icon: FileText,        labelKey: 'invoicesTitle'  },
     { to: '/admin/employees',  icon: Users,           labelKey: 'employeesTitle' },
+    { to: '/admin/customers',  icon: Contact,         labelKey: 'customersTitle' },
     { to: '/admin/inventory',  icon: BarChart3,       labelKey: 'inventoryTitle' },
     { to: '/admin/suppliers',  icon: Truck,           labelKey: 'suppliersTitle' },
   ]

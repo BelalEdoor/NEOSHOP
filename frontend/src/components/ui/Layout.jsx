@@ -4,10 +4,11 @@ import { useTranslation } from 'react-i18next'
 import { useAuthStore, ADMIN_EMAILS } from '../../store'
 import { ShoppingCart, User, Map, LogOut, ShoppingBag, Globe, Brain, Tag, Shield } from 'lucide-react'
 import i18n from '../../i18n/index'
+import AccountDisabledModal from './AccountDisabledModal'
 
 export default function Layout() {
   const { t } = useTranslation()
-  const { user, logout } = useAuthStore()
+  const { user, logout, accountDisabled } = useAuthStore()
   const navigate = useNavigate()
   const isAdmin = user && ADMIN_EMAILS.includes(user.email)
 
@@ -93,6 +94,8 @@ export default function Layout() {
       <main className="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8" style={{ overflowY: 'auto', minHeight: 0 }}>
         <Outlet />
       </main>
+
+      {accountDisabled && <AccountDisabledModal />}
     </div>
   )
 }

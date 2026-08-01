@@ -34,8 +34,14 @@ class Settings(BaseSettings):
     ADMIN_EMAILS: str = "admin@neoshop.com,owner@neoshop.com"
 
     # ─── CV / YOLO ────────────────────────────────────────────────────────
-    YOLO_MODEL_PATH: str = "yolov8n.pt"
+    YOLO_MODEL_PATH: str = "cv/models/best.pt"
     CAMERA_STREAM_URL: str = "0"
+
+    # ─── Theft / Cart brake ──────────────────────────────────────────────
+    # عدد الثواني التي تظهر خلالها الشاشة الحمراء المنبثقة على نقطة البيع
+    # بعد رصد منتج بالسلة دون مسح. إن لم يُعَد مسح الباركود خلالها، يُرسَل
+    # أمر تفعيل الفرامل (٤ سيرفوهات عبر الدرايفر) إلى الراسبيري باي.
+    CART_BRAKE_GRACE_SECONDS: float = 10.0
 
     class Config:
         env_file = ".env"

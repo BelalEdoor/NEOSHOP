@@ -1,0 +1,10 @@
+# Training (run on your PC/Colab, not the Raspberry Pi)
+torch>=2.0
+torchvision>=0.15
+onnx
+onnxscript
+
+# Inference (this is all you need on the Raspberry Pi)
+onnxruntime
+opencv-python
+numpy

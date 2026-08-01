@@ -12,6 +12,7 @@
  *   - الـ baseURL تقرأ من VITE_API_URL
  */
 import axios from 'axios'
+import { useAuthStore } from '../store'
 
 const BASE_URL = (import.meta.env.VITE_API_URL || 'http://localhost:8000') + '/api'
 const WS_BASE  = import.meta.env.VITE_WS_URL  || 'ws://localhost:8000'
@@ -37,6 +38,13 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (res) => res,
   (err) => {
+    // الحساب مُعطَّل من لوحة الأدمن (مثلاً بعد رصد نشاط مشبوه) — أظهر شاشة
+    // منبثقة على صفحة الحساب بدل تسجيل خروج صامت. راجع
+    // components/ui/AccountDisabledModal.jsx المثبَّت بـ Layout.jsx.
+    if (err.response?.status === 403 && err.response?.data?.detail === 'Account disabled') {
+      useAuthStore.getState().setAccountDisabled(true)
+      return Promise.reject(err)
+    }
     if (err.response?.status === 401) {
       const isAdminRoute = window.location.pathname.startsWith('/admin')
       const raw = localStorage.getItem('neoshop-auth')
@@ -168,6 +176,17 @@ export const adminApi = {
   overview:    () => api.get('/admin/overview'),
   topProducts: (limit = 10) => api.get('/admin/top-products', { params: { limit } }),
   salesSummary: () => api.get('/admin/sales-summary'),
+}
+
+// ─── Admin — حسابات العملاء (AdminCustomers.jsx) ───────────────────────────────
+export const adminCustomerApi = {
+  list:      (q) => api.get('/users/admin/customers', { params: q ? { q } : {} }),
+  get:       (id) => api.get(`/users/admin/customers/${id}`),
+  getInvoices: (id) => api.get(`/users/admin/customers/${id}/invoices`),
+  update:    (id, data) => api.put(`/users/admin/customers/${id}`, data),
+  resetPassword: (id, newPassword) => api.post(`/users/admin/customers/${id}/reset-password`, { new_password: newPassword }),
+  disable:   (id) => api.post(`/users/${id}/disable`),
+  enable:    (id) => api.post(`/users/${id}/enable`),
 }
 
 // ─── WebSocket helpers ────────────────────────────────────────────────────────

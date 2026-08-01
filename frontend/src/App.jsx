@@ -20,6 +20,7 @@ import AdminProducts from './pages/admin/AdminProducts'
 import AdminCarts from './pages/admin/AdminCarts'
 import AdminInvoices from './pages/admin/AdminInvoices'
 import AdminEmployees from './pages/admin/AdminEmployees'
+import AdminCustomers from './pages/admin/AdminCustomers'
 import AdminInventory from './pages/admin/AdminInventory'
 import AdminSuppliers from './pages/admin/AdminSuppliers'
 import './i18n'
@@ -82,6 +83,7 @@ export default function App() {
           <Route path="carts"     element={<AdminCarts />} />
           <Route path="invoices"  element={<AdminInvoices />} />
           <Route path="employees" element={<AdminEmployees />} />
+          <Route path="customers" element={<AdminCustomers />} />
           <Route path="inventory" element={<AdminInventory />} />
           <Route path="suppliers" element={<AdminSuppliers />} />
         </Route>

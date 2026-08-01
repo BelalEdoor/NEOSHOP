@@ -1,0 +1,5 @@
+Best validation accuracy: 1.0000
+Classes (index order): ['20', '50']
+Confusion matrix (rows=true, cols=pred):
+[[34  0]
+ [ 0 26]]

@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { productApi, sessionApi, analysisApi, createCartWebSocket } from '../hooks/useApi'
 import { useAuthStore, useSessionStore, usePaymentStore } from '../store'
+import TheftWarningModal from '../components/pos/TheftWarningModal'
 import {
   Trash2, Plus, Minus, X, Loader2, Package,
   ScanLine, Zap, Tag, ReceiptText, PackageX,
@@ -277,6 +278,8 @@ export default function POSPage() {
   const [showSearch,    setShowSearch]    = useState(false)
   const [showPayment,   setShowPayment]   = useState(false)
   const [wsConnected,   setWsConnected]   = useState(false)
+  const [theftAlert,    setTheftAlert]    = useState(null)  // {alert_id, object_class, grace_seconds, ...} | null
+  const [cartLocked,    setCartLocked]    = useState(false)
 
   const barcodeRef = useRef(null)
   const wsRef      = useRef(null)
@@ -395,15 +398,33 @@ export default function POSPage() {
             }, 5000)
             break
           case 'theft_alert':
-            toast.error(
-              isAr
-                ? `⚠️ تنبيه أمني: ${msg.data?.description || 'نشاط مشبوه'}`
-                : `⚠️ Security Alert: ${msg.data?.description || 'Suspicious activity'}`,
-              { duration: 6000 }
-            )
+            // منتج غير مسحوب — شاشة حمراء منبثقة إن كانت المهلة محددة
+            // (grace_seconds تصل فقط لتنبيهات UNSCANNED_IN_CART المكانية).
+            if (msg.data?.grace_seconds) {
+              setTheftAlert(msg.data)
+            } else {
+              // تحذير مبكر (زمني — منتج بيد العميل بمنطقة المسح) — Toast فقط
+              toast.error(
+                isAr
+                  ? `⚠️ تنبيه أمني: ${msg.data?.description || 'نشاط مشبوه'}`
+                  : `⚠️ Security Alert: ${msg.data?.description || 'Suspicious activity'}`,
+                { duration: 6000 }
+              )
+            }
+            if (msg.data?.brake_activated) {
+              setTheftAlert(null)
+              setCartLocked(true)
+            }
+            break
+          case 'theft_alert_cleared':
+            // أعاد العميل المسح في الوقت المحدد — أغلق الشاشة الحمراء بهدوء
+            setTheftAlert(null)
+            toast.success(isAr ? '✅ تم التحقق من المنتج' : '✅ Item verified', { duration: 3000 })
             break
           case 'cart_locked':
+            setCartLocked(!!msg.locked)
             if (msg.locked) {
+              setTheftAlert(null)
               toast.error(isAr ? '🔒 تم قفل العربة' : '🔒 Cart locked', { duration: 5000 })
             }
             break
@@ -796,6 +817,9 @@ export default function POSPage() {
       )}
       {showPayment && (
         <PaymentStatusModal session={session} isAr={isAr} onClose={() => setShowPayment(false)} />
+      )}
+      {(theftAlert || cartLocked) && (
+        <TheftWarningModal alert={theftAlert} locked={cartLocked} isAr={isAr} />
       )}
 
       <style>{`

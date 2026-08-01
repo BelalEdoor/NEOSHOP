@@ -39,6 +39,7 @@ from mqtt.client import mqtt_service
 from mqtt.handlers import setup_handlers
 import mqtt.handlers as mqtt_handlers
 from cv.theft_detection import theft_service
+from cv.alert_handler import handle_theft_alert
 
 log = logging.getLogger("neoshop.main")
 logging.basicConfig(level=logging.INFO)
@@ -58,6 +59,7 @@ async def lifespan(app: FastAPI):
 
     # 2. تحميل YOLOv8
     theft_service.load_model()
+    theft_service.set_theft_callback(handle_theft_alert)
     log.info("✓ YOLOv8 model loaded")
 
     # 3. تهيئة MQTT

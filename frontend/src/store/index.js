@@ -20,9 +20,11 @@ export const useAuthStore = create(
     (set, get) => ({
       user:  null,
       token: null,
-      setAuth:  (user, token) => set({ user, token }),
+      accountDisabled: false, // NEW — يُفعَّل عند استلام 403 "Account disabled" من أي API call
+      setAuth:  (user, token) => set({ user, token, accountDisabled: false }),
       setUser:  (user)        => set({ user }),
-      logout:   () => set({ user: null, token: null }),
+      setAccountDisabled: (v) => set({ accountDisabled: v }),
+      logout:   () => set({ user: null, token: null, accountDisabled: false }),
       isAdmin:  () => {
         const { user } = get()
         return user && ADMIN_EMAILS.includes(user.email)
@@ -128,4 +130,31 @@ export const useRefillStore = create((set) => ({
   removePendingAlert: (paymentId) => set((state) => ({
     pendingAlerts: state.pendingAlerts.filter(a => a.payment_id !== paymentId),
   })),
+}))
+
+// ─── Theft / Security Alerts Store (NEW) ───────────────────────────────────────
+// تنبيهات "منتج داخل السلة بدون مسح" القادمة من نظام الرؤية الحاسوبية —
+// نفس نمط useRefillStore أعلاه، لكن لتنبيهات الأمن. تُغذّى من نفس اتصال
+// WebSocket الإداري الوحيد (/ws/admin) عبر components/admin/RefillNotifications.jsx
+// (اسمه القديم بقي كما هو، لكنه أصبح يدير قناة WS المشتركة لكل الإشعارات).
+export const useTheftStore = create((set) => ({
+  activeAlerts: [],   // [{alert_id, session_id, cart_id, cart_rfid, alert_type, description, brake_activated, ...}]
+
+  addAlert: (alert) => set((state) => {
+    // لو نفس session_id عندها تنبيه نشط مسبقاً، حدّثه بدل تكراره (مثلاً
+    // تصعيد PROLONGED_HOLDING → UNSCANNED_IN_CART → BRAKE_ACTIVATED لنفس العربة)
+    const idx = state.activeAlerts.findIndex(a => a.session_id === alert.session_id)
+    if (idx >= 0) {
+      const next = [...state.activeAlerts]
+      next[idx] = { ...next[idx], ...alert }
+      return { activeAlerts: next }
+    }
+    return { activeAlerts: [alert, ...state.activeAlerts] }
+  }),
+
+  removeAlertBySession: (sessionId) => set((state) => ({
+    activeAlerts: state.activeAlerts.filter(a => a.session_id !== sessionId),
+  })),
+
+  clearAll: () => set({ activeAlerts: [] }),
 }))
