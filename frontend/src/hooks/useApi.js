@@ -23,40 +23,46 @@ const api = axios.create({
   headers: { 'Content-Type': 'application/json' },
 })
 
-// ─── Auth interceptor ────────────────────────────────────────────────────────
-api.interceptors.request.use((config) => {
-  const raw = localStorage.getItem('neoshop-auth')
-  if (raw) {
-    try {
-      const { state } = JSON.parse(raw)
-      if (state?.token) config.headers.Authorization = `Bearer ${state.token}`
-    } catch (_) {}
-  }
-  return config
-})
 
-api.interceptors.response.use(
-  (res) => res,
-  (err) => {
-    // الحساب مُعطَّل من لوحة الأدمن (مثلاً بعد رصد نشاط مشبوه) — أظهر شاشة
-    // منبثقة على صفحة الحساب بدل تسجيل خروج صامت. راجع
-    // components/ui/AccountDisabledModal.jsx المثبَّت بـ Layout.jsx.
-    if (err.response?.status === 403 && err.response?.data?.detail === 'Account disabled') {
-      useAuthStore.getState().setAccountDisabled(true)
-      return Promise.reject(err)
-    }
-    if (err.response?.status === 401) {
-      const isAdminRoute = window.location.pathname.startsWith('/admin')
+// ─── Auth interceptor ────────────────────────────────────────────────────────
+api.interceptors.request.use(
+  (config) => {
+    try {
+      // أولاً: حاول أخذ الـ token من Zustand
+      const storeToken = useAuthStore.getState()?.token
+
+      // ثانياً: fallback إلى localStorage
+      let localToken = null
       const raw = localStorage.getItem('neoshop-auth')
-      let hadToken = false
-      try { hadToken = !!JSON.parse(raw)?.state?.token } catch (_) {}
-      if (!isAdminRoute && hadToken) {
-        localStorage.removeItem('neoshop-auth')
-        window.location.href = '/login'
+
+      if (raw) {
+        try {
+          const parsed = JSON.parse(raw)
+          localToken = parsed?.state?.token || null
+        } catch (_) {
+          localToken = null
+        }
       }
+
+      const token = storeToken || localToken
+
+      if (token) {
+        config.headers = config.headers || {}
+        config.headers.Authorization = `Bearer ${token}`
+      }
+
+      // Debug مؤقت — احذفه بعد التأكد أن المشكلة انتهت
+      console.log(
+        `[API] ${config.method?.toUpperCase()} ${config.url}`,
+        token ? 'Token attached' : 'NO TOKEN'
+      )
+    } catch (error) {
+      console.error('[API] Failed to attach auth token:', error)
     }
-    return Promise.reject(err)
-  }
+
+    return config
+  },
+  (error) => Promise.reject(error)
 )
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
@@ -79,6 +85,7 @@ export const productApi = {
   create:    (data)   => api.post('/products/', data),
   update:    (id, data) => api.put(`/products/${id}`, data),
   remove:    (id)     => api.delete(`/products/${id}`),
+  offers: () => api.get('/products/offers'),
 }
 
 // ─── Sessions (NEW — إدارة جلسات التسوق) ─────────────────────────────────────

@@ -1,136 +1,69 @@
-# Currency Denomination Classifier (20 / 50 NIS)
+# Banknote Validation — Merged Pipeline
 
-## شو صار
+هذا المشروع يدمج مشروعين كانا منفصلين:
 
-فحصت الصور اللي بعتها (RGB + UV)، ولقيت إنها متقسمة تلقائيًا لجلسات (كل جلسة بترجع الترقيم لـ 001):
+| المشروع الأصلي | الملفات | الوظيفة |
+|---|---|---|
+| مشروع 1 — Classifier | `infer.py` | يحدد فئة العملة (20 / 50 / ...) من صورة ملونة (RGB) باستخدام موديل ONNX مُدرَّب مسبقًا |
+| مشروع 2 — UV Authenticity (من الملف المضغوط) | `alignment.py`, `banknote_detector.py` | يتحقق من أصالة العملة من صورة UV عبر: تقويم/محاذاة الصورة → threshold → قص الـROIs → OCR (Tesseract) → قرار AUTHENTIC/FAKE |
+| **الجديد** | `main.py` | يربط المشروعين ببعض: يطلب صورة RGB أولاً (يمررها للـclassifier)، ثم يطلب صورة UV (يمررها لملف `banknote_detector.py` كما هو دون أي تعديل في منطقه)، ثم يدمج النتيجتين بقرار نهائي ACCEPTED/REJECTED |
 
-| المصدر | الجلسة | عدد الصور | التصنيف |
-|---|---|---|---|
-| RGB | 140336–140352 | 6 | فاضية (ما في ورقة نقدية) — استبعدتها |
-| RGB | 140430–141000 | 100 | **20** (ورقة خضرا) |
-| RGB | 141915–142446 | 100 | **50** (ورقة بنفسجية/حمرا) |
-| UV | 141004–141639 | 100 | **20** |
-| UV | 142450–143125 | 100 | **50** |
-
-المجموع: 200 صورة لفئة "20" و200 صورة لفئة "50" (RGB + UV مع بعض عشان الموديل يشتغل صح على النوعين).
-
-**ملاحظة:** ما استخدمت خط preprocessing الكلاسيكي (grayscale → blur → adaptive threshold → morphology) زي ما طلبت — الموديل بياخد الصورة الخام مباشرة، بس بيعمل resize (160×160) و normalize (0–1) جوه كود الـ inference نفسه.
-
-## النتيجة
-
-دربت CNN خفيف (depthwise-separable، ~150K parameter، من الصفر بدون pretrained weights عشان يشتغل offline وما يعتمد على تحميل أوزان من الإنترنت):
+## هيكلية المشروع
 
 ```
-Best validation accuracy: 1.0000 (34/34 على split التحقق)
-Confusion matrix: [[34, 0], [0, 26]]  -> صفر أخطاء
+banknote_project/
+├── main.py                 # نقطة التشغيل الموحّدة (جديد)
+├── infer.py                 # الـclassifier (مشروع 1 - بدون تعديل)
+├── alignment.py              # محاذاة العملة تحت UV (من الملف المضغوط - بدون تعديل)
+├── banknote_detector.py      # فحص الأصالة عبر OCR (من الملف المضغوط - بدون تعديل)
+├── requirements.txt          # متطلبات الاثنين مع بعض
+├── outputs/                  # ⚠️ ضع هنا الموديل المدرّب:
+│   ├── currency_classifier.onnx
+│   └── class_names.json
+└── output/                   # يُنشأ تلقائيًا عند التشغيل: كل محاولة UV بتتحفظ بمجلد مختلف بالتاريخ/الوقت
 ```
 
-جربته كمان يدويًا على صور RGB و UV من الفئتين وطلعت النتايج كلها صح مع confidence عالي (0.68–0.99).
-
-## الملفات
-
-```
-organize_dataset.py   - يرتب صور الالتقاط الخام (RGB/UV) في dataset/20 و dataset/50
-train.py               - يدرب الموديل ويصدره ONNX
-infer.py                - سكربت جاهز يستخدم ONNX Runtime للتصنيف
-outputs/
-  best_model.pt              - checkpoint بايثون (لو حبيت تكمل تدريب لاحقًا)
-  currency_classifier.onnx   - **الموديل النهائي اللي بتحطه على الـ Raspberry Pi (مدرب وجاهز، مش لازم تعيد التدريب)**
-  class_names.json           - ["20", "50"] (ترتيب الـ output classes)
-  training_report.txt        - دقة التحقق + confusion matrix
-```
-
-## لو بدك تعيد التدريب بنفسك (اختياري — الموديل الجاهز موجود بالفعل)
-
-الموديل المدرب `outputs/currency_classifier.onnx` جاهز للاستخدام مباشرة على الـ Pi. بس لو حابب تعيد التدريب (مثلاً بعد ما تضيف صور جديدة):
-
-1. ثبّت المتطلبات: `pip install -r requirements.txt`
-2. فك ضغط الأرشيفين الخام **جنب هاي السكربتات** بهاي البنية بالظبط:
-   ```
-   currency_classifier/
-     raw_rgb/capture/*.jpg   <- فك capture.7z هون
-     raw_uv/capture/*.jpg    <- فك capture1.7z هون
-   ```
-   (على الماك: `7z x capture.7z -oraw_rgb` و `7z x capture1.7z -oraw_uv`، أو أي برنامج فك ضغط عادي بس تأكد المجلد الناتج اسمه `raw_rgb`/`raw_uv` وفيه مجلد `capture` جواه)
-3. شغّل بالترتيب:
-   ```bash
-   python3 organize_dataset.py
-   python3 train.py
-   ```
-
-## الاستخدام على الـ Raspberry Pi
-
-بس محتاج (مش لازم PyTorch):
-```bash
-pip install onnxruntime opencv-python numpy
-```
-
-```python
-from infer import CurrencyClassifier
-import cv2
-
-clf = CurrencyClassifier()  # يحمّل outputs/currency_classifier.onnx تلقائيًا
-frame_bgr = cv2.imread("captured_note.jpg")   # أو فريم من الكاميرا
-frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-label, confidence = clf.predict(frame_rgb)
-print(label, confidence)   # مثلاً: "20" 0.9986
-```
-
-`predict()` بترجع `("20"|"50", confidence)` وبتقدر تربطها مباشرة مع `paper_detector.py` بعد ما يحدد إن في ورقة نقدية بالإطار.
-
-## لو بدك تعيد التدريب على صور جديدة
-
-1. حط الصور الجديدة بنفس نمط التسمية (`rgb_capture_YYYYMMDD_HHMMSS_NNN.jpg` أو `uv_capture_...`).
-2. عدّل `SESSION_LABELS_RGB` / `SESSION_LABELS_UV` في `organize_dataset.py` حسب ترتيب الجلسات الجديدة.
-3. شغّل: `python3 organize_dataset.py && python3 train.py`
-
----
-
-## وحدة كشف التزوير (UV Authenticity / Anomaly Detection)
-
-### ليش anomaly detection مش classifier عادي؟
-
-عنا بس صور عملات **أصلية** تحت UV — ما في ولا عينة مزورة نتدرب عليها. فما فيني أبني classifier بفئتين (أصلي/مزور) لأنه ما في شي "مزور" يتعلم شكله. البديل المنطقي: **autoencoder** يتدرب فقط على صور UV الأصلية، يتعلم يعيد بناءها منيح جدًا (الخيوط الفلورية، أنماط الحبر...). أي صورة UV بتختلف عن هاد النمط — سواء عملة مزورة أو صورة ملتقطة بظروف غريبة — بيطلع خطأ إعادة البناء (reconstruction error) فيها أعلى من صور الأصلي، فبتنعلّم "مشكوك فيها".
-
-**⚠️ مهم:** الحد (threshold) معايَر بس على صور أصلية (ما في عينة مزورة نختبر عليها فعليًا). اعتبر النتيجة "مشكوك فيها" = يحتاج فحص إضافي، مش "تأكيد إنها مزورة"، لحد ما تجرّبه على عملة مزورة حقيقية وتضبط `THRESHOLD_MARGIN` حسب النتيجة.
-
-### تقسيمة الداتا
-
-- بتاخد بس صور `uv_*.jpg` من `dataset/20` و `dataset/50` (200 صورة UV أصلية إجمالًا — 100 لكل فئة). صور RGB ما بتستخدم هون لأنها ما بتحمل خصائص التوهج تحت UV.
-- الفئتين (20 و50) بتترمّجوا مع بعض بنفس الـ dataset — الهدف إن الـ autoencoder يتعلم "شكل التوهج الأصلي تحت UV" بشكل عام، مش خاص بفئة وحدة.
-- التقسيم train/val بطريقة **stratified** (85% تدريب / 15% تحقق) — يعني نسبة 20/50 محفوظة بكل من التدريب والتحقق، مش عشوائي بالكامل.
-
-### الملفات الجديدة
-
-```
-train_authenticity.py   - يدرب الـ autoencoder على صور UV الأصلية ويصدره ONNX
-infer_authenticity.py   - سكربت ONNX Runtime يحسب reconstruction error ويقارنه بالـ threshold
-outputs/ (بعد التدريب):
-  best_autoencoder.pt          - checkpoint بايثون
-  autoencoder_uv.onnx          - الموديل النهائي (يستخدم على الـ Pi)
-  authenticity_threshold.json  - الـ threshold المحسوب + إحصائيات الأخطاء
-  authenticity_report.txt      - ملخص التدريب والمعايرة
-```
-
-### كيف تدرب
+## طريقة التشغيل
 
 ```bash
 pip install -r requirements.txt
-python3 organize_dataset.py   # إذا ما شغّلته قبل
-python3 train_authenticity.py
+python3 main.py
 ```
 
-### كيف تستخدمه على الـ Pi
+هيطلب منك أولاً تختار صورة RGB (تحدد الفئة)، وبعدها صورة UV (تتحقق من الأصالة)، وبالنهاية بيطلعلك تقرير نهائي فيه الفئة + نسبة الثقة + حالة الأصالة + القرار النهائي (ACCEPTED / REJECTED).
 
+## علامات الأمان تختلف بموقعها حسب فئة العملة (جديد)
+
+بما إن كل فئة (20/50/100/200) إلها أبعاد فيزيائية مختلفة، فبعد ما `alignment.py` يقوم بمحاذاة الصورة لنفس الحجم القياسي (1200x600)، علامة الأمان (الرقم المتوهج) ما بتطلع بنفس المكان لكل الفئات. لهيك ضفنا بـ `banknote_detector.py`:
+
+- `DENOMINATION_ROIS`: dictionary بيربط كل فئة (20, 50, ...) بإحداثيات ROI الخاصة فيها (`top_left` و `bottom_left`).
+- `get_rois_for_denomination(denomination)`: بترجع الإحداثيات الصحيحة حسب الفئة، أو الإحداثيات الافتراضية (fallback) مع تحذير لو الفئة مش معايرة بعد.
+- `process_banknote()` صار ياخد باراميتر جديد `classifier_denomination` (نفس الفئة اللي رجعها الـclassifier من `infer.py`) ويستخدمه تلقائيًا لاختيار الـROI الصح.
+- `main.py` صار يمرر فئة العملة (اللي حددها الموديل من صورة RGB) مباشرة لـ`check_authenticity()` → `process_banknote()`.
+
+**فئة 20 NIS**: تم استخراج الإحداثيات فعليًا من صور الـUV اللي بعتّها (`07_detected_regions.jpg` وباقي الصور):
 ```python
-from infer_authenticity import AuthenticityChecker
-import cv2
-
-checker = AuthenticityChecker()  # يحمّل outputs/autoencoder_uv.onnx + threshold تلقائيًا
-frame_bgr = cv2.imread("uv_captured_note.jpg")
-frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-is_genuine, error, threshold = checker.check(frame_rgb)
-print("genuine" if is_genuine else "suspicious", error, threshold)
+20: {
+    "top_left": (754, 143, 147, 119),
+    "bottom_left": (299, 338, 147, 119),
+}
 ```
+جربتها على نفس صورتك وصار يطلع القرار AUTHENTIC (بعد ما كان REJECTED/No Security Mark Detected) لأن الـROI القديم كان قاطع نص الرقم المتوهج.
 
-بتقدر تربطه مع `infer.py` (تصنيف 20/50) بحيث تشغّل الاثنين على نفس الالتقاطة: `infer.py` يحدد الفئة من صورة RGB، و`infer_authenticity.py` يفحص صورة UV لنفس الورقة إذا في شبهة تزوير.
+**فئة 50 NIS (وأي فئة تانية)**: لسا مش معايرة — حاليًا عم تستخدم نفس الـROI الافتراضي القديم كـplaceholder. **ابعتلي نفس نوع الصور اللي بعتها هلأ (خصوصًا `03_aligned_banknote.jpg` و `07_detected_regions.jpg`) لعملة 50 حقيقية**، وبعايرلها إحداثيات صحيحة بنفس الطريقة.
+
+خطوات المعايرة يدويًا (موثقة كمان جوا الكود فوق `DENOMINATION_ROIS`):
+1. شغّل البايبلاين مرة على عينة UV حقيقية لهاي الفئة.
+2. افتح `07_detected_regions.jpg` بمجلد `output/<timestamp>/` وشوف وين المربعات الصفراء (المناطق المتوهجة).
+3. حدد أي مجموعة مربعات هي فعلاً الرقم المتوهج (مش النص التسلسلي ولا الخيط الأمني)، وسجل `(x, y, w, h)` تبعها مع padding حوالي 20px، وهاي تصير `top_left`.
+4. اعمل mirror إلها لتصير `bottom_left`:
+   `x' = 1200 - x - w`, `y' = 600 - y - h`
+
+**ملاحظة إضافية**: عدّلت كمان `OCR_THRESHOLD_VALUE` من 210 إلى 165 لأن القيمة القديمة كانت عم تمسح معظم خطوط الرقم المتوهج بعد تصحيح الـROI — جربت مجال 150-170 وصار الـOCR يقرأ "20" صح.
+
+## ملاحظات مهمة
+
+1. **الموديل**: لازم يكون ملف `currency_classifier.onnx` و `class_names.json` موجودين داخل مجلد `outputs/` (نفس المسار اللي بيتوقعه `infer.py`) — هذول ملفات الموديل المدرّب مسبقًا من مشروعك، لازم تنسخهم إنت لهاي المجلد (ما كانوا مرفوعين هون).
+2. **Tesseract**: `banknote_detector.py` بيحتاج تثبيت برنامج Tesseract OCR على الجهاز نفسه (مش بس المكتبة البايثون)، وبعدين تتأكد إن `TESSERACT_PATH` بأعلى الملف يشاور على المسار الصحيح حسب نظام التشغيل (mac / ubuntu / Raspberry Pi).
+3. ما تم استخدام ملفي `config.py` و`main.py` القديمين اللي رفعتهم لأنهم كانوا بيعتمدوا على موديول `vision/` (مثل `vision.uv_validator`, `vision.image_utils`) مش موجود ضمن اللي رفعته — فاعتمدت مباشرة على تقنية الـOCR الموجودة فعليًا بالملف المضغوط (`banknote_detector.py` + `alignment.py`) متل ما طلبت بالضبط. إذا عندك موديول `vision/` كامل بمكان تاني، ابعتهولي وندمجه بدل هاي الطريقة.
+4. منطق كل من `alignment.py` و `banknote_detector.py` ما تم تغييره إطلاقًا — فقط تم استدعاء الدالة `process_banknote()` الموجودة فيهم من `main.py` الجديد.

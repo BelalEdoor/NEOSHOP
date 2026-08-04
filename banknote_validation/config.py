@@ -202,17 +202,83 @@ class VisionConfig:
     """
 
     # --- Gaussian blur ---
-    GAUSSIAN_KERNEL_SIZE: tuple[int, int] = (5, 5)
+    # Larger kernel smooths out the sensor-grain noise typical of low-light
+    # UV captures BEFORE thresholding, which is the main source of the
+    # "salt-and-pepper" white dots seen in the binarized output.
+    GAUSSIAN_KERNEL_SIZE: tuple[int, int] = (9, 9)
     GAUSSIAN_SIGMA_X: float = 0.0
 
     # --- Adaptive threshold ---
-    ADAPTIVE_THRESH_BLOCK_SIZE: int = 35   # must be odd
-    ADAPTIVE_THRESH_C: int = 10
+    # Bigger block size -> each pixel is compared against a wider local
+    # neighborhood average, so it's less sensitive to a single noisy pixel.
+    # Bigger C -> raises the cutoff a note's local mean must exceed before
+    # being called "bright", which suppresses weak/noisy false positives.
+    ADAPTIVE_THRESH_BLOCK_SIZE: int = 51   # must be odd
+    ADAPTIVE_THRESH_C: int = 15
     ADAPTIVE_THRESH_MAX_VALUE: int = 255
 
     # --- Morphology ---
+    # MORPH_KERNEL_SIZE / MORPH_ITERATIONS below are used for the existing
+    # closing operation (fills small gaps in real features).
     MORPH_KERNEL_SIZE: tuple[int, int] = (5, 5)
     MORPH_ITERATIONS: int = 2
+
+    # NEW: opening operation (erosion -> dilation), applied BEFORE closing.
+    # This is what actually removes small isolated white speckles/dots,
+    # since erosion wipes out anything smaller than the kernel and dilation
+    # then restores the size of whatever survived (the real "50" text).
+    # Kept moderate deliberately: this feeds BOTH the debug visualization
+    # AND the real UVValidator accept/reject decision. (5,5)x2 iterations
+    # was tried and completely erased thin genuine security features
+    # (security thread, digit strokes) before contour extraction, causing
+    # UV_MIN_BRIGHT_REGIONS to never be met -> false REJECTED verdicts.
+    # Rely on MIN_NOISE_BLOB_AREA_PX (post-contour area filtering) as the
+    # primary noise defense instead of an aggressive opening here.
+    MORPH_OPEN_KERNEL_SIZE: tuple[int, int] = (3, 3)
+    MORPH_OPEN_ITERATIONS: int = 1
+
+    # NEW: after finding contours/blobs in the binary image, drop anything
+    # smaller than this area (in pixels). Cleans up any speckles that
+    # survive the morphological opening step above.
+    MIN_NOISE_BLOB_AREA_PX: int = 20
+
+    # --- UV top-hat debug visualization (main.py) ---
+    # Structuring-element size for the top-hat filter used to isolate
+    # locally-bright UV features (digits/security thread) from an evenly
+    # overexposed note surface. Must be bigger than a digit's stroke width
+    # but smaller than the note itself. Too small -> background survives
+    # too (this was the noise source); too big -> real features get
+    # cancelled out too. Start around 20-30px and adjust by eye.
+    UV_TOPHAT_KERNEL_SIZE: int = 25
+
+    # Manual bias added ON TOP OF the automatically-computed Otsu cutoff
+    # before thresholding the top-hat result. Otsu alone often sits too
+    # low, letting faint local-contrast bumps (residual noise, paper
+    # texture) count as "bright". Raising this offset pushes the cutoff
+    # higher so only genuinely strong fluorescent features survive.
+    # Increase in small steps (5-10 at a time) and re-check the debug
+    # image; too high will start eating real security-feature pixels too
+    # (this happened at 15 - dropped back down here).
+    UV_TOPHAT_THRESHOLD_OFFSET: int = 8
+
+    # Gaussian blur kernel applied ONLY before the top-hat debug
+    # visualization (not the shared VISION_CONFIG.GAUSSIAN_KERNEL_SIZE
+    # used by the actual accept/reject pipeline in UVValidator). Kept
+    # separate so smoothing out noise for the *debug image* never risks
+    # softening the features the real decision is based on. Top-hat is a
+    # local-contrast operator, so noise suppression matters more here than
+    # in the main pipeline - hence a larger kernel than GAUSSIAN_KERNEL_SIZE.
+    UV_TOPHAT_PRE_BLUR_KERNEL_SIZE: tuple[int, int] = (15, 15)
+
+    # Morphological-opening kernel/iterations used to clean the top-hat
+    # DEBUG mask ONLY - deliberately kept separate from
+    # MORPH_OPEN_KERNEL_SIZE/MORPH_OPEN_ITERATIONS above (which feed the
+    # real UVValidator accept/reject decision). This one can be tuned as
+    # aggressively as needed purely for a cleaner-looking debug image
+    # without ever risking erasing genuine security features from the
+    # actual pipeline's contour detection again.
+    UV_TOPHAT_MASK_OPEN_KERNEL_SIZE: tuple[int, int] = (5, 5)
+    UV_TOPHAT_MASK_OPEN_ITERATIONS: int = 2
 
     # --- Contour / paper-shape detection ---
     MIN_CONTOUR_AREA_RATIO: float = 0.15   # min area (as ratio of frame area) to be "paper"
@@ -225,9 +291,9 @@ class VisionConfig:
     ROI_PADDING_PX: int = 10
 
     # --- UV brightness / security-thread analysis ---
-    UV_BRIGHTNESS_THRESHOLD: int = 160      # pixel intensity considered "fluorescent"
-    UV_MIN_BRIGHT_PIXEL_RATIO: float = 0.004  # min fraction of ROI that must fluoresce
-    UV_MAX_BRIGHT_PIXEL_RATIO: float = 0.35
+    UV_BRIGHTNESS_THRESHOLD: int = 200      # pixel intensity considered "fluorescent"
+    UV_MIN_BRIGHT_PIXEL_RATIO: float = 0.006  # min fraction of ROI that must fluoresce
+    UV_MAX_BRIGHT_PIXEL_RATIO: float = 0.60
     UV_MIN_BRIGHT_REGIONS: int = 1          # min distinct fluorescent blobs expected
 
 

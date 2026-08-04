@@ -2,26 +2,33 @@
 main.py
 ========
 
-Banknote validation pipeline.
+Unified Banknote Validation Pipeline
+-------------------------------------
+Merges the two previously separate projects:
 
-1. User selects a WHITE/RGB banknote image from the computer.
-2. CurrencyClassifier (existing trained model, infer.py) predicts the
-   denomination (20 / 50 / ...).
-3. User selects a UV banknote image from the computer.
-4. UVValidator (vision/uv_validator.py) analyzes the UV image for genuine
-   fluorescent security features:
-       grayscale -> blur -> adaptive threshold -> morphology -> contours
-       -> UV brightness ratio -> bright-region count -> is_valid
-5. Final result is ACCEPTED or REJECTED.
+    1) DENOMINATION CLASSIFIER (infer.py)
+       Trained ONNX CNN (CurrencyClassifier) that predicts the note's
+       value ("20" / "50" / ...) from a normal WHITE/RGB photo.
 
-Note on ROI extraction:
-    The UV image selected here is expected to already be a crop of the
-    note itself (not a full camera frame with background), so
-    ROIExtractor is not required in this manual/file-picker flow. If this
-    script is later wired to the live camera pipeline (full frame with
-    background), extract the note region with
-    ``vision.roi.ROIExtractor().extract(...)`` *before* calling
-    ``UVValidator.validate(...)``.
+    2) UV AUTHENTICITY CHECK (alignment.py + banknote_detector.py)
+       Classical OpenCV + Tesseract OCR pipeline that reads the
+       fluorescent security number printed on the note under UV light
+       and decides AUTHENTIC / FAKE. This is the exact pipeline that
+       shipped inside banknote_testing.zip, untouched.
+
+Flow
+----
+1. User picks a WHITE/RGB image from disk.
+   -> CurrencyClassifier.predict() returns (denomination, confidence).
+2. User picks a UV image of the SAME note from disk.
+   -> banknote_detector.process_banknote() runs the full classical CV
+      pipeline (alignment -> threshold -> ROI crop -> OCR -> decision)
+      and returns an info dict, including info["status"] which is
+      "AUTHENTIC" or "FAKE". Every intermediate stage image is saved
+      under output/<timestamp>/ exactly as before (unchanged behavior).
+3. The two results are combined into one final decision:
+      ACCEPTED  -> UV check says AUTHENTIC
+      REJECTED  -> UV check says FAKE
 
 Usage:
     python3 main.py
@@ -30,23 +37,19 @@ Usage:
 from __future__ import annotations
 
 import tkinter as tk
-from datetime import datetime
-from pathlib import Path
 from tkinter import filedialog
 
 import cv2
 
 from infer import CurrencyClassifier
-from config import CAMERA_CONFIG, PATHS, VISION_CONFIG
-from vision import UVValidationError
-from vision.uv_validator import UVValidator
+from banknote_detector import process_banknote
 
 
 # ----------------------------------------------------------------------------
-# File selection helpers
+# File selection helper
 # ----------------------------------------------------------------------------
 def select_image(title: str) -> str:
-    """Open a file dialog and return the selected image path."""
+    """Open a file dialog and return the selected image path (or '' if cancelled)."""
     root = tk.Tk()
     root.withdraw()
     root.attributes("-topmost", True)
@@ -65,48 +68,61 @@ def select_image(title: str) -> str:
     return path
 
 
-def load_rgb_image(path: str):
-    """Load an image with OpenCV and convert BGR -> RGB (for CurrencyClassifier)."""
-    bgr = cv2.imread(path)
+# ----------------------------------------------------------------------------
+# Stage 1: Denomination classification (WHITE / RGB image)
+# ----------------------------------------------------------------------------
+def classify_denomination(classifier: CurrencyClassifier) -> tuple[str, float] | None:
+    print("\n[1] Select the WHITE / RGB banknote image...")
+    rgb_path = select_image("Select WHITE / RGB banknote image")
 
+    if not rgb_path:
+        print("No RGB image selected.")
+        return None
+
+    print(f"Selected RGB image: {rgb_path}")
+
+    bgr = cv2.imread(rgb_path)
     if bgr is None:
-        raise ValueError(f"Could not read image: {path}")
+        print(f"Could not read image: {rgb_path}")
+        return None
 
-    return cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+    rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+    denomination, confidence = classifier.predict(rgb)
 
+    print(f"\nCurrency       : {denomination} NIS")
+    print(f"Confidence     : {confidence:.4f} ({confidence:.2%})")
+    print("-" * 60)
 
-def load_bgr_image(path: str):
-    """Load an image with OpenCV, keeping the native BGR order (for UVValidator)."""
-    bgr = cv2.imread(path)
-
-    if bgr is None:
-        raise ValueError(f"Could not read image: {path}")
-
-    return bgr
-
-
-def save_image(image_bgr, directory: Path, filename: str) -> Path:
-    """
-    Persist a BGR image under ``directory`` (created if missing) using the
-    configured JPEG quality.
-
-    Args:
-        image_bgr: Image to save, in BGR order (OpenCV's native order).
-        directory: Target directory, e.g. ``PATHS.UV_IMAGE_DIR`` or
-            ``PATHS.DEBUG_IMAGE_DIR``.
-        filename: Target filename, e.g. ``"20260731_142201_uv_raw.jpg"``.
-
-    Returns:
-        The full path the image was written to.
-    """
-    directory.mkdir(parents=True, exist_ok=True)
-    out_path = directory / filename
-    cv2.imwrite(str(out_path), image_bgr, [cv2.IMWRITE_JPEG_QUALITY, CAMERA_CONFIG.JPEG_QUALITY])
-    return out_path
+    return denomination, confidence
 
 
 # ----------------------------------------------------------------------------
-# Main pipeline
+# Stage 2: UV authenticity check (UV image)
+# ----------------------------------------------------------------------------
+def check_authenticity(classifier_denomination: str) -> dict | None:
+    print("\n[2] Select the UV banknote image...")
+    uv_path = select_image("Select UV banknote image")
+
+    if not uv_path:
+        print("No UV image selected.")
+        return None
+
+    print(f"Selected UV image: {uv_path}")
+    print("\nRunning UV authenticity pipeline (alignment -> threshold -> OCR)...\n")
+
+    # process_banknote() runs the entire classical-CV pipeline from
+    # banknote_detector.py end-to-end and saves every debug stage image
+    # under output/<timestamp>/, exactly like the original standalone
+    # script. We pass the classifier's denomination through so it picks
+    # the security-mark ROI pair calibrated for THIS note's physical size
+    # (see DENOMINATION_ROIS in banknote_detector.py) instead of always
+    # using the same fixed ROI regardless of denomination.
+    info = process_banknote(image_path=uv_path, classifier_denomination=classifier_denomination)
+    return info
+
+
+# ----------------------------------------------------------------------------
+# Main
 # ----------------------------------------------------------------------------
 def main() -> None:
     print()
@@ -114,149 +130,30 @@ def main() -> None:
     print("             BANKNOTE VALIDATION")
     print("=" * 60)
 
-    # ---------------------------------------------------------
-    # 1. Select WHITE/RGB image
-    # ---------------------------------------------------------
-    print("\n[1] Select the WHITE/RGB banknote image...")
-
-    rgb_path = select_image("Select WHITE / RGB banknote image")
-
-    if not rgb_path:
-        print("No RGB image selected.")
-        return
-
-    print(f"Selected RGB image: {rgb_path}")
-
-    rgb_image = load_rgb_image(rgb_path)
-
     classifier = CurrencyClassifier()
-    denomination, confidence = classifier.predict(rgb_image)
 
-    print(f"\nCurrency       : {denomination} NIS")
-    print(f"Confidence     : {confidence:.4f} ({confidence:.2%})")
-    print("-" * 60)
+    denom_result = classify_denomination(classifier)
+    if denom_result is None:
+        return
+    denomination, confidence = denom_result
 
-    # ---------------------------------------------------------
-    # 2. Select UV image
-    # ---------------------------------------------------------
-    print("\n[2] Select the UV banknote image...")
-
-    uv_path = select_image("Select UV banknote image")
-
-    if not uv_path:
-        print("No UV image selected.")
+    uv_info = check_authenticity(denomination)
+    if uv_info is None:
         return
 
-    print(f"Selected UV image: {uv_path}")
+    authenticity = uv_info["status"]  # "AUTHENTIC" or "FAKE"
+    final_result = "ACCEPTED" if authenticity == "AUTHENTIC" else "REJECTED"
 
-    uv_image = load_bgr_image(uv_path)
-
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-
-    raw_uv_path = save_image(uv_image, PATHS.UV_IMAGE_DIR, f"{timestamp}_uv_raw.jpg")
-    print(f"Saved raw UV image to: {raw_uv_path}")
-
-    # ---------------------------------------------------------
-    # 3. UV authenticity check
-    # ---------------------------------------------------------
-    print("\nChecking UV authenticity...")
-
-    validator = UVValidator()
-
-    try:
-        result = validator.validate(uv_image)
-    except UVValidationError as exc:
-        print(f"\nUV validation failed: {exc}")
-
-        failed_path = save_image(uv_image, PATHS.DEBUG_IMAGE_DIR, f"{timestamp}_uv_error.jpg")
-        print(f"Saved failed UV image to: {failed_path}")
-
-        print("\n" + "=" * 60)
-        print(f"FINAL DECISION : REJECTED (UV validation error)")
-        print("=" * 60)
-        print()
-        return
-
-    cfg = VISION_CONFIG
-
-    print(f"\nUV Mean Brightness : {result.mean_brightness:.4f}")
-    print(f"Bright Pixel Ratio  : {result.bright_pixel_ratio:.4f}")
-    print(
-        f"Allowed Ratio       : {cfg.UV_MIN_BRIGHT_PIXEL_RATIO:.4f} - "
-        f"{cfg.UV_MAX_BRIGHT_PIXEL_RATIO:.4f}"
-    )
-    print(f"Bright Regions      : {result.num_bright_regions}")
-    print(f"Required Regions    : {cfg.UV_MIN_BRIGHT_REGIONS}")
-    print("-" * 60)
-
-    if result.is_valid:
-        authenticity = "GENUINE"
-        final_result = "ACCEPTED"
-    else:
-        authenticity = "SUSPICIOUS"
-        final_result = "REJECTED"
-
-    # Save a copy tagged with the verdict, and a debug overlay showing the
-    # detected fluorescent regions (contours) that drove the decision.
-    verdict_path = save_image(
-        uv_image, PATHS.UV_IMAGE_DIR, f"{timestamp}_uv_{final_result.lower()}.jpg"
-    )
-    print(f"Saved UV image ({final_result}) to: {verdict_path}")
-
-    # Debug visualization: the raw UV image next to an ISOLATED mask that
-    # highlights only locally-brighter details (the fluorescent digits /
-    # security thread), not the whole overexposed note surface.
-    #
-    # A plain global threshold (old approach) fails when the lighting is
-    # strong (e.g. 4x UV LEDs): the entire note crosses the threshold and
-    # the mask turns almost all-white, drowning out the actual feature.
-    #
-    # Top-hat filtering fixes this without touching the lighting: for each
-    # pixel it subtracts the *local neighborhood's* brightness (computed
-    # via a morphological "opening" with a kernel bigger than a digit's
-    # stroke width but smaller than the note itself). A digit is brighter
-    # than its immediate surroundings even on an overexposed note, so it
-    # survives; the broad, evenly-bright background gets cancelled out.
-    gray = cv2.cvtColor(uv_image, cv2.COLOR_BGR2GRAY)
-
-    # Tune this: must be bigger than the digit stroke width, smaller than
-    # the note. Too small -> background survives too. Too big -> digits
-    # get cancelled out too. Start around 20-30px and adjust by eye.
-    TOPHAT_KERNEL_SIZE = 25
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (TOPHAT_KERNEL_SIZE, TOPHAT_KERNEL_SIZE))
-    tophat = cv2.morphologyEx(gray, cv2.MORPH_TOPHAT, kernel)
-
-    # Otsu picks the cut-off from this shot's own histogram instead of a
-    # fixed number, so it adapts automatically to how strong the lighting
-    # was for this particular capture.
-    _, bright_mask = cv2.threshold(tophat, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    bright_mask_bgr = cv2.cvtColor(bright_mask, cv2.COLOR_GRAY2BGR)
-
-    debug_overlay = cv2.hconcat([uv_image, bright_mask_bgr])
-
-    debug_path = save_image(
-        debug_overlay, PATHS.DEBUG_IMAGE_DIR, f"{timestamp}_uv_regions_debug.jpg"
-    )
-    print(f"Saved UV regions debug image to: {debug_path}")
-
-    cv2.imshow("UV Fluorescent Regions (press any key to continue)", debug_overlay)
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
-
-    # ---------------------------------------------------------
-    # Final result
-    # ---------------------------------------------------------
     print()
     print("=" * 60)
-    print("                    RESULT")
+    print("                    FINAL RESULT")
     print("=" * 60)
-    print(f"Currency       : {denomination} NIS")
-    print(f"Confidence     : {confidence:.2%}")
-    print(f"UV Authenticity: {authenticity}")
-    print(f"Bright Ratio   : {result.bright_pixel_ratio:.4f}")
-    print(f"Bright Regions : {result.num_bright_regions}")
+    print(f"Currency (model)   : {denomination} NIS")
+    print(f"Confidence (model) : {confidence:.2%}")
+    print(f"UV Authenticity    : {authenticity}")
+    print(f"Matched ROI        : {uv_info['source_roi'] or '-'} / {uv_info['source_orientation'] or '-'}")
     print("-" * 60)
-    print(f"FINAL DECISION : {final_result}")
+    print(f"FINAL DECISION     : {final_result}")
     print("=" * 60)
     print()
 

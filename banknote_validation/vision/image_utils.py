@@ -62,6 +62,46 @@ class ImageUtils:
             raise VisionError(f"Failed to convert image to grayscale: {exc}") from exc
 
     @staticmethod
+    def reduce_brightness(image: np.ndarray, factor: float = 0.5) -> np.ndarray:
+        """
+        Darken an image by scaling every pixel's intensity down by
+        ``factor``.
+
+        Used to bring an overexposed capture (e.g. a UV photo taken under
+        strong LEDs, where the whole note washes out to near-white) back
+        down to a natural brightness level, similar to a reference UV
+        photo, before saving or running further analysis on it.
+
+        Args:
+            image: Source BGR (or grayscale) image.
+            factor: Multiplier applied to every pixel value, in the range
+                ``(0.0, 1.0]``. ``0.5`` halves the brightness; ``1.0``
+                leaves the image unchanged. Tune this by eye - start
+                around 0.4-0.6 and adjust until the result matches the
+                desired reference exposure.
+
+        Returns:
+            A new, darkened image (same shape/dtype as the input).
+
+        Raises:
+            VisionError: If ``image`` is ``None`` or ``factor`` is outside
+                ``(0.0, 1.0]``.
+        """
+        import cv2
+
+        if image is None:
+            raise VisionError("Cannot reduce brightness of a None image.")
+        if not (0.0 < factor <= 1.0):
+            raise VisionError(f"Brightness factor must be in (0.0, 1.0], got {factor}.")
+        try:
+            # alpha < 1.0 scales pixel values down (darkens); beta=0 adds
+            # no flat offset. convertScaleAbs also clips/rounds back into
+            # the valid 0-255 uint8 range for us.
+            return cv2.convertScaleAbs(image, alpha=factor, beta=0)
+        except Exception as exc:  # noqa: BLE001
+            raise VisionError(f"Failed to reduce image brightness: {exc}") from exc
+
+    @staticmethod
     def resize_image(image: np.ndarray, width: int, height: int) -> np.ndarray:
         """
         Resize an image to an exact target size using area interpolation
