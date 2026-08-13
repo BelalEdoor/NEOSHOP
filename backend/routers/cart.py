@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from core.database import get_db
 from core.security import get_current_user, ADMIN_EMAILS
+from core.rfid_utils import normalize_rfid
 from models.cart import Cart, CartStatus
 from models.user import User
 from schemas import CartOut
@@ -45,6 +46,7 @@ def register_cart(
     """تسجيل عربة جديدة مع RFID UID."""
     if current_user.email not in ADMIN_EMAILS:
         raise HTTPException(403, "Admin access required")
+    rfid_uid = normalize_rfid(rfid_uid)
     if db.query(Cart).filter(Cart.rfid_uid == rfid_uid).first():
         raise HTTPException(400, "RFID already registered to another cart")
     if db.query(Cart).filter(Cart.cart_number == cart_number).first():
@@ -72,11 +74,13 @@ def update_cart(
     if not cart:
         raise HTTPException(404, "Cart not found")
 
-    if req.rfid_uid and req.rfid_uid != cart.rfid_uid:
-        existing = db.query(Cart).filter(Cart.rfid_uid == req.rfid_uid).first()
-        if existing:
-            raise HTTPException(400, "RFID already registered to another cart")
-        cart.rfid_uid = req.rfid_uid
+    if req.rfid_uid:
+        new_rfid = normalize_rfid(req.rfid_uid)
+        if new_rfid != cart.rfid_uid:
+            existing = db.query(Cart).filter(Cart.rfid_uid == new_rfid).first()
+            if existing:
+                raise HTTPException(400, "RFID already registered to another cart")
+            cart.rfid_uid = new_rfid
 
     if req.cart_number and req.cart_number != cart.cart_number:
         existing = db.query(Cart).filter(Cart.cart_number == req.cart_number).first()

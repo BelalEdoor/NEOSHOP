@@ -26,8 +26,11 @@ export default function LoginPage() {
   const [notFound, setNotFound] = useState(false)
   const [showPass, setShowPass] = useState(false)
 
-  // RFID العربة الحالية — مضبوط في .env لكل راسبيري باي
-  const CART_RFID = import.meta.env.VITE_CART_RFID || null
+  // الهوية الثابتة لهذه العربة — مضبوطة مرة واحدة في .env لكل راسبيري باي
+  // ولا تتغيّر أبداً. الباك اند يسحب rfid_uid الحالي من قاعدة البيانات
+  // بنفسه عند بدء الجلسة، فتغيير الأونر للبطاقة لاحقاً من لوحة التحكم
+  // ينعكس تلقائياً بدون أي حاجة لإعادة بناء الفرونت اند.
+  const CART_NUMBER = import.meta.env.VITE_CART_NUMBER || null
 
   const validate = () => {
     const e = {}
@@ -60,19 +63,34 @@ export default function LoginPage() {
       }
 
       // ── Step 2: فتح جلسة تسوق مرتبطة بالعربة تلقائياً ───────────────
-      // CART_RFID هو RFID العربة المثبّت في .env لهاد الراسبيري باي
-      const params = CART_RFID ? `?cart_rfid=${encodeURIComponent(CART_RFID)}` : ''
-      await api.post(
-        `/sessions/start${params}`,
-        null,
-        { headers: { Authorization: `Bearer ${access_token}` } }
-      )
+      // CART_NUMBER هو الهوية الثابتة للعربة المثبّتة في .env لهاد الراسبيري
+      // باي — الباك اند يحلّ rfid_uid الحالي من جدول carts بنفسه.
+      const params = CART_NUMBER ? `?cart_number=${encodeURIComponent(CART_NUMBER)}` : ''
+      try {
+        await api.post(
+          `/sessions/start${params}`,
+          null,
+          { headers: { Authorization: `Bearer ${access_token}` } }
+        )
+      } catch (sessionErr) {
+        if (CART_NUMBER && sessionErr?.response?.status === 404) {
+          // العربة غير مسجّلة بقاعدة البيانات بعد — سجّل الدخول عادي وأبلغ
+          // المستخدم بدل ما يفشل تسجيل الدخول بالكامل بسبب هذا الخطأ
+          toast.error(
+            isAr
+              ? `⚠️ عربة "${CART_NUMBER}" غير مسجّلة بعد — راجع الأونر`
+              : `⚠️ Cart "${CART_NUMBER}" is not registered yet — contact the owner`
+          )
+        } else {
+          throw sessionErr
+        }
+      }
 
       // حفظ بيانات المستخدم والتوكن
       setAuth(user, access_token)
 
       toast.success(
-        CART_RFID
+        CART_NUMBER
           ? (isAr ? `✅ مرحباً ${user.name}! جلسة التسوق بدأت` : `✅ Welcome ${user.name}! Shopping session started`)
           : (isAr ? `✅ مرحباً ${user.name}!` : `✅ Welcome ${user.name}!`)
       )
@@ -126,10 +144,10 @@ export default function LoginPage() {
           </p>
 
           {/* إظهار رقم العربة الحالية */}
-          {CART_RFID && (
+          {CART_NUMBER && (
             <div className="inline-flex items-center gap-2 mt-3 px-4 py-2 rounded-full text-sm font-bold"
               style={{ background: '#ede9fe', color: '#7c3aed' }}>
-              🛒 {isAr ? 'العربة:' : 'Cart:'} {CART_RFID}
+              🛒 {isAr ? 'العربة:' : 'Cart:'} {CART_NUMBER}
             </div>
           )}
         </div>

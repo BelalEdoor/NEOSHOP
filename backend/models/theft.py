@@ -16,9 +16,16 @@ class TheftAlertType(str, enum.Enum):
     ITEM_CONCEALED     = "ITEM_CONCEALED"       # إخفاء منتج
     MULTIPLE_ITEMS     = "MULTIPLE_ITEMS"       # أخذ عدة منتجات دفعة واحدة
     BRAKE_ACTIVATED    = "BRAKE_ACTIVATED"      # تفعيل الفرامل
+    BRAKE_RELEASED     = "BRAKE_RELEASED"       # تحرير الفرامل (زر "تفعيل السلة" بالداشبورد)
     # ─── من محرّك cv/theft_logic.py (اكتشاف اليد + المنطقتين) ─────────────
     PROLONGED_HOLDING  = "PROLONGED_HOLDING"    # منتج بيد العميل بمنطقة المسح دون مسح لفترة طويلة
     UNSCANNED_IN_CART  = "UNSCANNED_IN_CART"    # منتج استقرّ داخل السلة دون أي مسح مسجَّل
+    # ─── سير العمل الحالي (Zone A / Zone B + مراقبة الفاتورة) ─────────────
+    PLEASE_SCAN_PRODUCT = "PLEASE_SCAN_PRODUCT"  # تحذير ٨ ثوانٍ على نقطة البيع: أعد مسح المنتج
+    PRODUCT_NOT_SCANNED = "PRODUCT_NOT_SCANNED"  # انتهت المهلة دون مسح ➜ تصعيد للفرامل
+    # ─── إرجاع منتج (B→A) وكشف تغطية الكاميرا ──────────────────────────────
+    ITEM_RETURNED_NOT_REMOVED = "ITEM_RETURNED_NOT_REMOVED"  # أُخرج منتج من السلة ولم يُحذف من الفاتورة — تحذير فقط، بدون فرامل
+    CAMERA_OBSTRUCTED = "CAMERA_OBSTRUCTED"                  # تغطية متعمّدة للعدسة (٣ ثوانٍ) ➜ فرامل فورية
 
 
 class TheftLog(Base):

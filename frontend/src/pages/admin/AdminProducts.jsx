@@ -5,7 +5,7 @@ import { formatPrice } from '../../utils/format'
 import toast from 'react-hot-toast'
 import { Plus, Pencil, Trash2, X, Search, AlertTriangle, Check } from 'lucide-react'
 
-const EMPTY = { name: '', name_ar: '', category: 'Dairy', price: '', stock: '', barcode: '', section: 'A1', is_on_offer: false, old_price: '', offer_expires_at: '' }
+const EMPTY = { name: '', name_ar: '', category: 'Dairy', cv_category: '', price: '', stock: '', barcode: '', section: 'A1', is_on_offer: false, old_price: '', offer_expires_at: '' }
 const CATEGORIES = ['Dairy','Bakery','Snacks','Beverages','Produce','Meat','Pantry']
 const SECTIONS = ['A1','A2','B1','B2','C1','C2','D1','D2','E1','F1']
 
@@ -25,6 +25,14 @@ export default function AdminProducts() {
   useEffect(() => {
     productApi.list({ limit: 200 }).then(({ data }) => setProducts(data)).catch(() => {})
   }, [])
+
+  // فئات تجارية متاحة للاقتراح: الثابتة الافتراضية + أي فئة جديدة استُخدمت
+  // فعلياً بالمنتجات الحالية — تسمح بإضافة فئة جديدة كلياً بالكتابة الحرة
+  // (input + datalist) بدل قائمة Dropdown مقفولة على القيم السبعة الأصلية.
+  const availableCategories = React.useMemo(() => {
+    const fromProducts = products.map(p => p.category).filter(Boolean)
+    return Array.from(new Set([...CATEGORIES, ...fromProducts])).sort()
+  }, [products])
 
   const filtered = products.filter(p =>
     !search ||
@@ -55,6 +63,11 @@ export default function AdminProducts() {
       barcode: form.barcode?.trim() || null,
       quantity: parseInt(form.stock) || 0,
       category: form.category,
+      // ⚠️ حقل منفصل تماماً عن category (التصنيف التجاري) — cv_category
+      // خاص فقط بمطابقة نموذج الرؤية الحاسوبية (bottle/can/chips...).
+      // حقل حرّ عمداً (بدون قائمة ثابتة) — الفئات المتاحة تتغيّر حسب
+      // الموديل المدرَّب، فلا يصح تقييدها بقائمة مبنية بالكود.
+      cv_category: form.cv_category?.trim() || null,
       section: form.section || null,
       is_on_offer: !!form.is_on_offer,
       old_price: form.is_on_offer && form.old_price ? parseFloat(form.old_price) : null,
@@ -219,9 +232,39 @@ export default function AdminProducts() {
               ))}
               <div>
                 <label className="block text-xs font-bold mb-1" style={{ color: 'var(--text2)' }}>{t('category')}</label>
-                <select className="input" value={form.category} onChange={e => setForm({ ...form, category: e.target.value })}>
-                  {CATEGORIES.map(c => <option key={c} value={c}>{t(c.toLowerCase()) || c}</option>)}
-                </select>
+                {/* حقل حرّ + اقتراحات (datalist) بدل Dropdown مقفول — تقدر
+                    تختار فئة موجودة أو تكتب فئة تجارية جديدة كلياً. */}
+                <input
+                  type="text"
+                  list="product-categories-list"
+                  className="input"
+                  placeholder={isAr ? 'مثال: Dairy — أو اكتب فئة جديدة' : 'e.g. Dairy — or type a new category'}
+                  value={form.category || ''}
+                  onChange={e => setForm({ ...form, category: e.target.value })}
+                />
+                <datalist id="product-categories-list">
+                  {availableCategories.map(c => <option key={c} value={c} />)}
+                </datalist>
+              </div>
+              <div>
+                <label className="block text-xs font-bold mb-1" style={{ color: 'var(--text2)' }}>
+                  {isAr ? 'فئة نموذج الرؤية الحاسوبية (CV)' : 'CV Model Category'}
+                </label>
+                {/* حقل حرّ (مش Dropdown محدود) — الفئات يلي الموديل يعرفها ممكن
+                    تتغيّر مع أي إعادة تدريب مستقبلية، فما بنقيّدها بقائمة ثابتة
+                    بالكود. اتركه فاضي للمنتجات غير المشمولة بكشف السرقة البصري. */}
+                <input
+                  type="text"
+                  className="input"
+                  placeholder={isAr ? 'مثال: bottle, chips, can — اتركه فاضي إذا غير منطبق' : 'e.g. bottle, chips, can — leave empty if not applicable'}
+                  value={form.cv_category || ''}
+                  onChange={e => setForm({ ...form, cv_category: e.target.value })}
+                />
+                <p className="text-xs mt-1" style={{ color: 'var(--text3)' }}>
+                  {isAr
+                    ? 'يُستخدَم لمطابقة هذا المنتج مع ما يكتشفه نظام كشف السرقة بالكاميرا — يجب أن يطابق تماماً إحدى فئات الموديل المدرَّب.'
+                    : 'Used to match this product against what the theft-detection camera model detects — must exactly match one of the trained model classes.'}
+                </p>
               </div>
               <div>
                 <label className="block text-xs font-bold mb-1" style={{ color: 'var(--text2)' }}>{t('storageSection')}</label>

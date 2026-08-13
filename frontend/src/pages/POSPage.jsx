@@ -283,6 +283,13 @@ export default function POSPage() {
 
   const barcodeRef = useRef(null)
   const wsRef      = useRef(null)
+  // منع تنفيذ initSession أكتر من مرة متوازية (React StrictMode بيشغّل كل
+  // effect مرتين بوضع التطوير، وأي إعادة رندر لسبب آخر ممكن تعيد استدعاء
+  // useEffect([initSession])). بدون هالحارس، كل استدعاء متزامن بينشئ جلسة
+  // Backend جديدة (sessionApi.start) والباك اند بيلغي الجلسة السابقة فوراً
+  // — فتتغيّر sessionId باستمرار بحلقة سريعة، وتبقى الكاميرا (تحدّث كل ٢
+  // ثانية) عالقة على أول جلسة شافتها لأنها ما بتلحق تتابع التبديل السريع.
+  const initInFlightRef = useRef(false)
 
   // ── Auto-focus barcode input ───────────────────────────────────────────────
   useEffect(() => { barcodeRef.current?.focus() }, [])
@@ -309,24 +316,29 @@ export default function POSPage() {
   // ── Init Session ───────────────────────────────────────────────────────────
   const initSession = useCallback(async () => {
     if (!token) { setCartLoading(false); return }
+    if (initInFlightRef.current) return   // ← الحارس: تجاهل أي استدعاء متزامن ثانٍ
+    initInFlightRef.current = true
 
-    // RFID العربة مخزّن في .env على الراسبيري باي
-    const cartRfid = import.meta.env.VITE_CART_RFID || null
+    // الهوية الثابتة لهذه العربة — تُضبط مرة واحدة بـ .env على الراسبيري باي
+    // ولا تتغيّر أبداً. الباك اند يسحب rfid_uid الحالي من قاعدة البيانات
+    // بنفسه، فتغيير الأونر لبطاقة RFID العربة لاحقاً ينعكس تلقائياً بدون
+    // أي حاجة لإعادة بناء الفرونت اند (راجع routers/session.py::start_session).
+    const cartNumber = import.meta.env.VITE_CART_NUMBER || null
 
     try {
       let activeSession = null
       try {
         const { data } = await sessionApi.getActive()
         activeSession = data
-        // إذا الجلسة موجودة بس ما عندها cart_rfid — أضفه
-        if (activeSession && !activeSession.cart_rfid && cartRfid) {
-          const { data: updated } = await sessionApi.start(cartRfid)
+        // إذا الجلسة موجودة بس ما عندها cart_id — أعِد ربطها بالعربة
+        if (activeSession && !activeSession.cart_id && cartNumber) {
+          const { data: updated } = await sessionApi.start(cartNumber)
           activeSession = updated
         }
       } catch {}
 
       if (!activeSession) {
-        const { data } = await sessionApi.start(cartRfid)
+        const { data } = await sessionApi.start(cartNumber)
         activeSession = data
       }
 
@@ -334,8 +346,18 @@ export default function POSPage() {
       setCartItems(activeSession.items || [])
     } catch (err) {
       console.error('Session init failed:', err)
-      toast.error(isAr ? 'تعذّر بدء الجلسة' : 'Could not start session')
+      if (err?.response?.status === 404) {
+        // العربة (cart_number) غير مسجّلة بقاعدة البيانات بعد
+        toast.error(
+          isAr
+            ? `عربة "${cartNumber}" غير مسجّلة — أضفها من لوحة تحكم الأونر (صفحة العربات) أولاً`
+            : `Cart "${cartNumber}" is not registered — ask the owner to add it from the admin dashboard (Carts page) first`
+        )
+      } else {
+        toast.error(isAr ? 'تعذّر بدء الجلسة' : 'Could not start session')
+      }
     } finally {
+      initInFlightRef.current = false
       setCartLoading(false)
     }
   }, [token, setSession, isAr])
@@ -343,115 +365,155 @@ export default function POSPage() {
   useEffect(() => { initSession() }, [initSession])
 
   // ── WebSocket — استقبال تحديثات real-time من Backend ──────────────────────
+  // مع إعادة اتصال تلقائية عند الانقطاع (كانت مفقودة سابقاً — أي انقطاع
+  // مؤقت، بما فيه إعادة الاتصال المزدوجة التي يفرضها React StrictMode
+  // بوضع التطوير، كان يترك نقطة البيع بلا اتصال حتى Refresh يدوي، فتضيع
+  // كل تنبيهات السرقة اللاحقة بصمت). نفس نمط إعادة الاتصال المستخدَم أصلاً
+  // في AdminSecurity.jsx.
   useEffect(() => {
     if (!sessionId) return
-    const ws = createCartWebSocket(sessionId)
-    wsRef.current = ws
+    let stopped = false
+    let retryTimer = null
 
-    ws.onopen = () => {
-      setWsConnected(true)
-      ws.send(JSON.stringify({ type: 'ping' }))
-    }
-    ws.onclose = () => setWsConnected(false)
-    ws.onerror = () => setWsConnected(false)
+    const connect = () => {
+      if (stopped) return
+      const ws = createCartWebSocket(sessionId)
+      wsRef.current = ws
 
-    ws.onmessage = (evt) => {
-      try {
-        const msg = JSON.parse(evt.data)
-        switch (msg.type) {
-          case 'cart_update':
-            // تحديث مباشر للمجموع
-            if (msg.data?.total_amount !== undefined) {
-              updateTotal(msg.data.total_amount)
-            }
-            break
-          case 'session_finished':
-            updateStatus('PENDING_PAYMENT')
-            break
-          case 'payment_started':
-            updateStatus('PAYMENT_IN_PROGRESS')
-            setShowPayment(true)
-            break
-          case 'payment_update':
-            updatePayment({
-              amount_inserted: msg.data?.amount_inserted,
-              status: 'IN_PROGRESS',
-            })
-            break
-          case 'payment_complete':
-            updateStatus('PAID')
-            updatePayment({
-              amount_inserted: msg.data?.amount_inserted,
-              change_returned: msg.data?.change_returned,
-              status: 'COMPLETED',
-            })
-            toast.success(isAr ? '✅ تم الدفع بنجاح!' : '✅ Payment completed!')
-            // تسجيل خروج تلقائي بعد إظهار رسالة "تم الدفع بنجاح" لعدة ثواني،
-            // عشان العميل يشوف تأكيد الدفع قبل ما تُقفل الجلسة وتُعاد الشاشة
-            // لصفحة تسجيل الدخول (جاهزة للعميل التالي).
-            setTimeout(() => {
-              setShowPayment(false)
-              clearSession()
-              clearPayment()
-              logout()
-              navigate('/login')
-            }, 5000)
-            break
-          case 'theft_alert':
-            // منتج غير مسحوب — شاشة حمراء منبثقة إن كانت المهلة محددة
-            // (grace_seconds تصل فقط لتنبيهات UNSCANNED_IN_CART المكانية).
-            if (msg.data?.grace_seconds) {
-              setTheftAlert(msg.data)
-            } else {
-              // تحذير مبكر (زمني — منتج بيد العميل بمنطقة المسح) — Toast فقط
-              toast.error(
-                isAr
-                  ? `⚠️ تنبيه أمني: ${msg.data?.description || 'نشاط مشبوه'}`
-                  : `⚠️ Security Alert: ${msg.data?.description || 'Suspicious activity'}`,
-                { duration: 6000 }
-              )
-            }
-            if (msg.data?.brake_activated) {
-              setTheftAlert(null)
-              setCartLocked(true)
-            }
-            break
-          case 'theft_alert_cleared':
-            // أعاد العميل المسح في الوقت المحدد — أغلق الشاشة الحمراء بهدوء
-            setTheftAlert(null)
-            toast.success(isAr ? '✅ تم التحقق من المنتج' : '✅ Item verified', { duration: 3000 })
-            break
-          case 'cart_locked':
-            setCartLocked(!!msg.locked)
-            if (msg.locked) {
-              setTheftAlert(null)
-              toast.error(isAr ? '🔒 تم قفل العربة' : '🔒 Cart locked', { duration: 5000 })
-            }
-            break
-          case 'refill_needed':
-            // نفدت أنابيب العملات — الدفع متوقف مؤقتاً (ليس ملغى) بانتظار
-            // تعبئة صاحب المتجر، وسيُستكمل تلقائياً بعدها على نفس الفاتورة.
-            updateStatus('AWAITING_REFILL')
-            toast(
-              isAr
-                ? '⏳ الرجاء الانتظار قليلاً، جاري تعبئة الباقي من قبل الموظف...'
-                : '⏳ Please wait a moment, staff is refilling your change...',
-              { duration: 10000, icon: '🪙' }
-            )
-            break
-          case 'refill_resolved':
-            // صاحب المتجر أكّد التعبئة — الدفعة رجعت تكمل تلقائياً
-            updateStatus('PAYMENT_IN_PROGRESS')
-            toast(
-              isAr ? '✅ جاري إكمال إرجاع الباقي...' : '✅ Resuming your change now...',
-              { duration: 4000, icon: '🪙' }
-            )
-            break
+      ws.onopen = () => {
+        setWsConnected(true)
+        ws.send(JSON.stringify({ type: 'ping' }))
+      }
+      ws.onclose = () => {
+        setWsConnected(false)
+        if (!stopped) {
+          clearTimeout(retryTimer)
+          retryTimer = setTimeout(connect, 3000)
         }
-      } catch {}
+      }
+      ws.onerror = () => { ws.close() }
+
+      ws.onmessage = (evt) => {
+        try {
+          const msg = JSON.parse(evt.data)
+          switch (msg.type) {
+            case 'cart_update':
+              // تحديث مباشر للمجموع
+              if (msg.data?.total_amount !== undefined) {
+                updateTotal(msg.data.total_amount)
+              }
+              break
+            case 'session_finished':
+              updateStatus('PENDING_PAYMENT')
+              break
+            case 'payment_started':
+              updateStatus('PAYMENT_IN_PROGRESS')
+              setShowPayment(true)
+              break
+            case 'payment_update':
+              updatePayment({
+                amount_inserted: msg.data?.amount_inserted,
+                status: 'IN_PROGRESS',
+              })
+              break
+            case 'payment_complete':
+              updateStatus('PAID')
+              updatePayment({
+                amount_inserted: msg.data?.amount_inserted,
+                change_returned: msg.data?.change_returned,
+                status: 'COMPLETED',
+              })
+              toast.success(isAr ? '✅ تم الدفع بنجاح!' : '✅ Payment completed!')
+              // تسجيل خروج تلقائي بعد إظهار رسالة "تم الدفع بنجاح" لعدة ثواني،
+              // عشان العميل يشوف تأكيد الدفع قبل ما تُقفل الجلسة وتُعاد الشاشة
+              // لصفحة تسجيل الدخول (جاهزة للعميل التالي).
+              setTimeout(() => {
+                setShowPayment(false)
+                clearSession()
+                clearPayment()
+                logout()
+                navigate('/login')
+              }, 5000)
+              break
+            case 'theft_alert':
+              // منتج استقرّ داخل السلة (Zone B) ولم تزد الفاتورة — شاشة حمراء
+              // منبثقة بعدّ تنازلي مدته grace_seconds (٨ ثوانٍ، تُملَى من
+              // cv/config.py::SCAN_TIMEOUT بالباك اند).
+              if (msg.data?.brake_activated) {
+                // تصعيد: انتهت المهلة وتم تفعيل الفرامل فعلياً على العربة
+                setTheftAlert(null)
+                setCartLocked(true)
+              } else if (msg.data?.grace_seconds) {
+                setTheftAlert(msg.data)
+              } else if (msg.data?.alert_type === 'ITEM_RETURNED_NOT_REMOVED') {
+                // العميل أخرج منتجاً من السلة ولم يحذفه من الفاتورة —
+                // تحذير أصفر بحت، بدون فرامل ولا شاشة قفل بأي شكل.
+                toast(
+                  isAr
+                    ? `↩️ تنبيه: منتج (${msg.data?.object_class || ''}) أُخرج من السلة ولم يُحذف من الفاتورة`
+                    : `↩️ Notice: (${msg.data?.object_class || 'item'}) was taken out of the cart but not removed from the invoice`,
+                  {
+                    duration: 7000,
+                    icon: '⚠️',
+                    style: { background: '#fef9c3', color: '#854d0e', border: '1.5px solid #fde68a', fontWeight: 700 },
+                  }
+                )
+              } else {
+                // تنبيه بلا مهلة محددة — Toast فقط
+                toast.error(
+                  isAr
+                    ? `⚠️ تنبيه أمني: ${msg.data?.description || 'نشاط مشبوه'}`
+                    : `⚠️ Security Alert: ${msg.data?.description || 'Suspicious activity'}`,
+                  { duration: 6000 }
+                )
+              }
+              break
+            case 'theft_alert_cleared':
+              // إمّا أن العميل أعاد المسح في الوقت المحدد، أو أن الموظف ضغط
+              // "تفعيل السلة" من لوحة التحكم — في الحالتين تُغلَق الشاشة
+              // الحمراء ويُفكّ القفل بهدوء.
+              setTheftAlert(null)
+              setCartLocked(false)
+              toast.success(isAr ? '✅ تم التحقق من المنتج' : '✅ Item verified', { duration: 3000 })
+              break
+            case 'cart_locked':
+              setCartLocked(!!msg.locked)
+              if (msg.locked) {
+                setTheftAlert(null)
+                toast.error(isAr ? '🔒 تم قفل العربة' : '🔒 Cart locked', { duration: 5000 })
+              }
+              break
+            case 'refill_needed':
+              // نفدت أنابيب العملات — الدفع متوقف مؤقتاً (ليس ملغى) بانتظار
+              // تعبئة صاحب المتجر، وسيُستكمل تلقائياً بعدها على نفس الفاتورة.
+              updateStatus('AWAITING_REFILL')
+              toast(
+                isAr
+                  ? '⏳ الرجاء الانتظار قليلاً، جاري تعبئة الباقي من قبل الموظف...'
+                  : '⏳ Please wait a moment, staff is refilling your change...',
+                { duration: 10000, icon: '🪙' }
+              )
+              break
+            case 'refill_resolved':
+              // صاحب المتجر أكّد التعبئة — الدفعة رجعت تكمل تلقائياً
+              updateStatus('PAYMENT_IN_PROGRESS')
+              toast(
+                isAr ? '✅ جاري إكمال إرجاع الباقي...' : '✅ Resuming your change now...',
+                { duration: 4000, icon: '🪙' }
+              )
+              break
+          }
+        } catch {}
+      }
     }
 
-    return () => { ws.close() }
+    connect()
+
+    return () => {
+      stopped = true
+      clearTimeout(retryTimer)
+      wsRef.current?.close()
+    }
   }, [sessionId, isAr])
 
   // ── Cart Operations ────────────────────────────────────────────────────────
@@ -557,9 +619,11 @@ export default function POSPage() {
   const handleClearCart = async () => {
     setCartItems([])
     if (sessionId) {
-      // بدء جلسة جديدة
+      // بدء جلسة جديدة — نعيد استخدام نفس هوية العربة الثابتة حتى لا
+      // تفقد الجلسة الجديدة ربطها بالعربة (ونفس تحذير 404 إن لم تكن مسجّلة)
+      const cartNumber = import.meta.env.VITE_CART_NUMBER || null
       try {
-        const { data } = await sessionApi.start()
+        const { data } = await sessionApi.start(cartNumber)
         setSession(data)
         clearPayment()
       } catch {}

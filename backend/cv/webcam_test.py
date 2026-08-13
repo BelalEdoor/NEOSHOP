@@ -12,44 +12,39 @@ cv/webcam_test.py
 تشغيل من داخل backend/:
     python cv/webcam_test.py
 
-اضغط Q للخروج.
+اضغط Q للخروج، S لمحاكاة عملية مسح.
 """
 import sys
 import time
+from pathlib import Path
 import cv2
-import numpy as np
 
-sys.path.insert(0, '.')
+BACKEND_ROOT = Path(__file__).resolve().parents[1]
+if str(BACKEND_ROOT) not in sys.path:
+    sys.path.insert(0, str(BACKEND_ROOT))
 
-from cv.theft_detection import (
-    TheftDetectionService,
-    ZONE_BOUNDARY, ZONE1_TIME_THRESHOLD,
-    PRODUCT_CLASSES, HAND_CLASSES,
-    CONFIDENCE_THRESHOLD, _iou,
-    TrackedObject,
-)
+from cv import config as cv_config
+from cv import zones
+from cv.detector import Detector
+from cv.theft_logic import TheftDetectionService
 
 try:
-    from ultralytics import YOLO
-    from core.config import settings
-    model = YOLO(settings.YOLO_MODEL_PATH)
-    print(f"[OK] YOLO model loaded: {settings.YOLO_MODEL_PATH}")
+    detector = Detector()
+    print(f"[OK] YOLO model loaded")
 except Exception as e:
     print(f"[ERROR] Could not load YOLO model: {e}")
     print("Make sure YOLO_MODEL_PATH is set in your .env file")
     sys.exit(1)
 
 # ── Colours ──────────────────────────────────────────────────────────────────
-ZONE1_COLOR   = (0,   200, 0)    # green  — scan zone
-ZONE2_COLOR   = (0,   100, 255)  # orange — cart basket
-PRODUCT_COLOR = (255, 255,  0)   # yellow — detected product
-HAND_COLOR    = (255,   0,  0)   # blue   — hand/person
-ALERT_COLOR   = (0,     0, 255)  # red    — alert
+PRODUCT_COLOR = (255, 255, 0)   # yellow — detected product
+HAND_COLOR = (255, 0, 0)        # blue   — hand/person
+ALERT_COLOR = (0, 0, 255)       # red    — alert
 
 SESSION_ID = 1
 svc = TheftDetectionService()
 alert_message = None
-alert_until   = 0.0
+alert_until = 0.0
 
 cap = cv2.VideoCapture(0)
 if not cap.isOpened():
@@ -57,9 +52,10 @@ if not cap.isOpened():
     sys.exit(1)
 
 print("\n[WEBCAM TEST] Starting live detection...")
-print(f"  Zone boundary: top {int(ZONE_BOUNDARY*100)}% of frame = Zone 1 (scan area)")
-print(f"  Zone 1 time threshold: {ZONE1_TIME_THRESHOLD}s before warning")
-print("  Press Q to quit\n")
+print(f"  Zone boundary: top {int(cv_config.ZONE_BOUNDARY*100)}% of frame = Zone 1 (scan area)")
+print(f"  Zone 1 time threshold: {cv_config.ZONE1_TIME_THRESHOLD}s before warning")
+print(f"  Zone 2 settle frames: {cv_config.SETTLE_FRAMES_REQUIRED}")
+print("  Press Q to quit, S to simulate a scan\n")
 
 while True:
     ret, frame = cap.read()
@@ -68,81 +64,48 @@ while True:
         break
 
     h, w = frame.shape[:2]
-    zone_line_y = int(h * ZONE_BOUNDARY)
     now = time.time()
 
     # ── Run YOLO ─────────────────────────────────────────────────────────────
-    results = model(frame, conf=CONFIDENCE_THRESHOLD, verbose=False)
-
-    detections = []
-    for result in results:
-        for box in result.boxes:
-            cls_id = int(box.cls[0])
-            conf   = float(box.conf[0])
-            label  = result.names[cls_id]
-            coords = box.xyxy[0].tolist()
-            detections.append({
-                "class":      label,
-                "confidence": round(conf, 3),
-                "box":        coords,
-            })
+    detections = detector.detect(frame)
 
     # ── Update tracker + evaluate threats ────────────────────────────────────
-    svc._update_tracker(SESSION_ID, detections, h)
-    alert = svc._evaluate_threats(SESSION_ID, detections, h)
-    if alert:
+    alerts = svc.update(SESSION_ID, detections, h)
+    for alert in alerts:
         alert_message = alert["description"]
-        alert_until   = now + 4.0
+        alert_until = now + 4.0
         print(f"[ALERT] {alert['alert_type']} — {alert['description']}")
 
     # ── Draw zones ───────────────────────────────────────────────────────────
-    # Zone 1 overlay (green tint, upper area)
-    zone1_overlay = frame.copy()
-    cv2.rectangle(zone1_overlay, (0, 0), (w, zone_line_y), ZONE1_COLOR, -1)
-    cv2.addWeighted(zone1_overlay, 0.08, frame, 0.92, 0, frame)
-
-    # Zone 2 overlay (orange tint, lower area)
-    zone2_overlay = frame.copy()
-    cv2.rectangle(zone2_overlay, (0, zone_line_y), (w, h), ZONE2_COLOR, -1)
-    cv2.addWeighted(zone2_overlay, 0.08, frame, 0.92, 0, frame)
-
-    # Zone boundary line
-    cv2.line(frame, (0, zone_line_y), (w, zone_line_y), (255, 255, 255), 2)
-
-    # Zone labels
-    cv2.putText(frame, "Zone 1 — SCAN AREA", (10, 25),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.6, ZONE1_COLOR, 2)
-    cv2.putText(frame, "Zone 2 — CART BASKET", (10, zone_line_y + 25),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.6, ZONE2_COLOR, 2)
+    frame = zones.draw_zone_overlay(frame)
 
     # ── Draw detections ───────────────────────────────────────────────────────
     for det in detections:
-        x1, y1, x2, y2 = [int(c) for c in det["box"]]
-        label = det["class"]
-        conf  = det["confidence"]
-        color = HAND_COLOR if label in HAND_CLASSES else PRODUCT_COLOR
+        x1, y1, x2, y2 = [int(c) for c in det["xyxy"]]
+        label = det["label"]
+        conf = det["conf"]
+        color = HAND_COLOR if det.get("category") == "hand" else PRODUCT_COLOR
 
         cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
         cv2.putText(frame, f"{label} {conf:.2f}",
                     (x1, max(y1 - 8, 12)),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
-    # ── Draw tracked object timers ────────────────────────────────────────────
-    tracked = svc._tracked_objects.get(SESSION_ID, {})
+    # ── Draw tracked object status ───────────────────────────────────────────
+    tracked = svc.tracker.get_tracked(SESSION_ID)
     for tid, obj in tracked.items():
-        duration = obj.zone1_duration
-        if duration > 0:
-            cx = int((obj.box[0] + obj.box[2]) / 2)
-            cy = int((obj.box[1] + obj.box[3]) / 2)
-            remaining = max(0, ZONE1_TIME_THRESHOLD - duration)
-            timer_text = f"Scan in {remaining:.1f}s" if remaining > 0 else "SCAN NOW!"
-            color = (0, 255, 0) if remaining > 1.5 else (0, 0, 255)
-            cv2.putText(frame, timer_text, (cx - 40, cy),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 2)
+        cx = int((obj.box[0] + obj.box[2]) / 2)
+        cy = int((obj.box[1] + obj.box[3]) / 2)
+
+        if getattr(obj, "stable_in_cart", False):
+            cv2.putText(frame, "Stable in cart", (cx - 45, cy),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 0), 2)
+        elif getattr(obj, "in_cart_zone", False):
+            cv2.putText(frame, "In cart", (cx - 30, cy),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 0), 2)
 
     # ── Draw active alert banner ──────────────────────────────────────────────
     if now < alert_until and alert_message:
-        # Red banner across top of frame
         cv2.rectangle(frame, (0, 0), (w, 55), ALERT_COLOR, -1)
         cv2.putText(frame, "⚠ THEFT ALERT", (10, 22),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
@@ -150,8 +113,9 @@ while True:
                     cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1)
 
     # ── Status bar ───────────────────────────────────────────────────────────
-    scanned_count = len(svc._scanned_products.get(SESSION_ID, set()))
-    status = f"Scanned: {scanned_count} | Tracked objects: {len(tracked)} | Press Q to quit"
+    from cv import scan_events
+    scanned = "yes" if scan_events.has_recent_scan(SESSION_ID, cv_config.SCAN_MATCH_WINDOW_SECONDS) else "no"
+    status = f"Recent scan: {scanned} | Tracked objects: {len(tracked)} | Press Q to quit"
     cv2.putText(frame, status, (10, h - 10),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.45, (200, 200, 200), 1)
 
@@ -161,9 +125,8 @@ while True:
     if key == ord('q') or key == ord('Q'):
         break
     elif key == ord('s'):
-        # Press S to simulate scanning a product (marks session as "something scanned")
         svc.register_scanned_product(SESSION_ID, 999)
-        print("[SIMULATED] Product scanned — session now has 1 scanned item")
+        print("[SIMULATED] Product scanned — recent scan registered")
 
 cap.release()
 cv2.destroyAllWindows()

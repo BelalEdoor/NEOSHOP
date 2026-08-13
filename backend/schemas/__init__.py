@@ -41,8 +41,11 @@ class TheftAlertTypeEnum(str, Enum):
     ITEM_CONCEALED      = "ITEM_CONCEALED"
     MULTIPLE_ITEMS      = "MULTIPLE_ITEMS"
     BRAKE_ACTIVATED     = "BRAKE_ACTIVATED"
+    BRAKE_RELEASED      = "BRAKE_RELEASED"
     PROLONGED_HOLDING   = "PROLONGED_HOLDING"
     UNSCANNED_IN_CART   = "UNSCANNED_IN_CART"
+    PLEASE_SCAN_PRODUCT = "PLEASE_SCAN_PRODUCT"
+    PRODUCT_NOT_SCANNED = "PRODUCT_NOT_SCANNED"
 
 
 # ─── Auth ──────────────────────────────────────────────────────────────────────
@@ -133,6 +136,9 @@ class ProductOut(BaseModel):
     barcode:     Optional[str]       = None
     quantity:    int
     category:    Optional[str]       = None
+    # فئة موديل الرؤية الحاسوبية (bottle/candy/chips/chocolate/nuts/pasta) —
+    # None يعني هذا المنتج غير مغطّى بكشف السرقة البصري.
+    cv_category: Optional[str]       = None
     brand:       Optional[str]       = None
     description: Optional[str]       = None
     ingredients: Optional[List[str]] = []
@@ -154,6 +160,7 @@ class ProductCreate(BaseModel):
     barcode:     Optional[str]       = None
     quantity:    int                 = 0
     category:    Optional[str]       = None
+    cv_category: Optional[str]       = None
     brand:       Optional[str]       = None
     description: Optional[str]       = None
     ingredients: Optional[List[str]] = []
@@ -171,6 +178,7 @@ class ProductUpdate(BaseModel):
     barcode:     Optional[str]       = None
     quantity:    Optional[int]       = None
     category:    Optional[str]       = None
+    cv_category: Optional[str]       = None
     brand:       Optional[str]       = None
     description: Optional[str]       = None
     ingredients: Optional[List[str]] = None

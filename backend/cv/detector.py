@@ -32,6 +32,8 @@ from cv import config as cv_config
 
 log = logging.getLogger("neoshop.cv")
 
+from cv.log_colors import colorize, CYAN, MAGENTA
+
 try:
     from ultralytics import YOLO
     YOLO_AVAILABLE = True
@@ -59,34 +61,52 @@ class Detector:
         if not YOLO_AVAILABLE:
             raise RuntimeError("ultralytics is not installed")
         self.model = YOLO(settings.YOLO_MODEL_PATH)
-        log.info(f"[CV] YOLOv8 model loaded: {settings.YOLO_MODEL_PATH}")
+        log.info(f"[CV] YOLOv8 model loaded: {settings.YOLO_MODEL_PATH} | classes: {self.model.names}")
 
         self._hands = None
         if MEDIAPIPE_AVAILABLE and CV2_AVAILABLE:
             self._hands = mp.solutions.hands.Hands(
                 static_image_mode=False,
+                model_complexity=cv_config.MEDIAPIPE_MODEL_COMPLEXITY,
                 max_num_hands=cv_config.MAX_HANDS,
                 min_detection_confidence=cv_config.HAND_DETECTION_CONFIDENCE,
                 min_tracking_confidence=cv_config.HAND_TRACKING_CONFIDENCE,
             )
-            log.info("[CV] MediaPipe Hands loaded")
+            log.info(f"[CV] MediaPipe Hands loaded (model_complexity={cv_config.MEDIAPIPE_MODEL_COMPLEXITY})")
         else:
             log.warning("[CV] MediaPipe Hands unavailable — no hand detections will be produced")
 
     def _categorize(self, raw_name: str) -> Optional[str]:
-        if raw_name in cv_config.PRODUCT_CLASSES:
+        normalized_name = raw_name.lower()
+
+        if normalized_name in {name.lower() for name in cv_config.PRODUCT_CLASSES}:
             return "product"
-        if raw_name in cv_config.HAND_CLASSES:
+        if normalized_name in {name.lower() for name in cv_config.HAND_CLASSES}:
             return "hand"
         return None
 
-    def detect(self, frame) -> List[dict]:
-        detections = self._detect_products(frame)
-        detections.extend(self._detect_hands(frame))
+    def detect(self, frame, run_products: bool = True, run_hands: bool = True) -> List[dict]:
+        """
+        run_products=False يتخطّى YOLO، run_hands=False يتخطّى MediaPipe —
+        يستخدمهما theft_logic.py حسب cv_config.ANALYZE_EVERY_N_FRAMES /
+        HAND_ANALYZE_EVERY_N_FRAMES. اليد غير مستخدَمة في قرار السرقة، فتشغيلها
+        أندر آمن تماماً وموفِّر ملحوظ لأن MediaPipe غالباً أثقل من نموذج YOLO
+        المخصَّص الصغير هنا.
+        """
+        detections = self._detect_products(frame) if run_products else []
+        if run_hands:
+            detections.extend(self._detect_hands(frame))
         return detections
 
     def _detect_products(self, frame) -> List[dict]:
-        results = self.model(frame, conf=cv_config.CONFIDENCE_THRESHOLD, verbose=False)
+        results = self.model.predict(
+            source=frame,
+            imgsz=cv_config.YOLO_IMGSZ,
+            conf=cv_config.CONFIDENCE_THRESHOLD,
+            iou=0.45,
+            max_det=cv_config.YOLO_MAX_DETECTIONS,
+            verbose=False,
+        )
 
         detections = []
         for result in results:
@@ -95,17 +115,31 @@ class Detector:
                 label = result.names[cls_id]
                 category = self._categorize(label)
                 if category != "product":
-                    # فئات اليد من YOLO (نادرة، لنموذج مخصّص لاحقاً) وأي فئة
-                    # أخرى غير معنية تُتجاهَل — MediaPipe هو مصدر اليد الوحيد.
                     continue
                 conf = float(box.conf[0])
                 xyxy = tuple(box.xyxy[0].tolist())
+                x1, y1, x2, y2 = xyxy
+
+                w = x2 - x1
+                h = y2 - y1
+
+                if w < 25 or h < 25:
+                    continue
+
                 detections.append({
                     "xyxy": xyxy,
                     "conf": round(conf, 3),
                     "label": label,
                     "category": category,
                 })
+
+        # ── لوق واضح ومميّز لكل منتج مكتشف — بالضبط الصيغة المطلوبة للتتبّع
+        # السريع بالعين أثناء التطوير/التصحيح، ملوَّن حتى يبرز وسط بقية اللوق ──
+        for d in detections:
+            log.info(colorize(
+                f"🎯 PRODUCT DETECTED — product: {d['label']} | accuracy: {d['conf']:.2f}",
+                CYAN, bold=True,
+            ))
         return detections
 
     def _detect_hands(self, frame) -> List[dict]:
@@ -118,6 +152,11 @@ class Detector:
 
         detections = []
         if results.multi_hand_landmarks:
+            # كانت log.info — بمعدّل عدة إطارات بالثانية هاد I/O ملحوظ فعلياً.
+            log.debug(colorize(
+                f"✋ HAND DETECTED — count: {len(results.multi_hand_landmarks)}",
+                MAGENTA,
+            ))
             for i, hand_landmarks in enumerate(results.multi_hand_landmarks):
                 xs = [lm.x * w for lm in hand_landmarks.landmark]
                 ys = [lm.y * h for lm in hand_landmarks.landmark]

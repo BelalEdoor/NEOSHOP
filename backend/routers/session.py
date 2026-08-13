@@ -20,6 +20,7 @@ import json
 
 from core.database import get_db
 from core.security import get_current_user, get_client_ip, audit
+from core.rfid_utils import normalize_rfid
 from models.session import ShoppingSession
 from models.cart import Cart, CartItem, CartStatus
 from models.product import Product
@@ -78,14 +79,24 @@ def _recalculate_total(session_id: int, db: Session) -> float:
 async def start_session(
     request: Request,
     cart_rfid: Optional[str] = None,
+    # ⚠️ الباگ الجذري وراء كل مشاكل "الجلسة عالقة/جلستان ACTIVE بنفس الوقت"
+    # التي واجهناها: الفرونت اند يرسل فعلياً `?cart_number=CART-001` وليس
+    # `cart_rfid` — واسم البراميتر هنا كان `cart_rfid` فقط، فكان FastAPI
+    # يتجاهل `cart_number` تماماً (غير معرَّف بالدالة)، فيبقى `cart_rfid`
+    # دائماً None، فـ `cart` يبقى None، فـ cart_id/cart_rfid يُخزَّنان NULL
+    # بكل جلسة، وبالتالي منطق "إلغاء الجلسات القديمة لنفس العربة" أدناه
+    # (المحاط بـ `if cart:`) لا يُنفَّذ أبداً رغم أنه صحيح تماماً. الآن
+    # نقبل الاسمين معاً (توافقية للخلف) ونحلّ العربة بأي منهما متوفر.
+    cart_number: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """
     بدء جلسة تسوق جديدة عند تسجيل دخول العميل.
-    cart_rfid اختياري في هذه المرحلة — يُربط لاحقاً عند الدفع.
+    يقبل إما cart_rfid أو cart_number (الفرونت اند الحالي يرسل الثاني).
     """
     ip = get_client_ip(request)
+    cart_rfid = normalize_rfid(cart_rfid) if cart_rfid else None
 
     # إغلاق أي جلسة نشطة قديمة للمستخدم
     old_session = db.query(ShoppingSession).filter(
@@ -97,10 +108,31 @@ async def start_session(
         old_session.ended_at = datetime.now(timezone.utc)
         db.commit()
 
-    # ربط العربة إذا تم تمرير RFID
+    # ربط العربة — بالـ RFID إن وُجد، وإلا برقم العربة (cart_number)
     cart = None
     if cart_rfid:
         cart = db.query(Cart).filter(Cart.rfid_uid == cart_rfid).first()
+    if cart is None and cart_number:
+        cart = db.query(Cart).filter(Cart.cart_number == cart_number).first()
+        if cart and cart.rfid_uid:
+            # الكاميرا/MQTT يعتمدان على cart_rfid المطبَّع، فلو العربة
+            # وُجدت عبر رقمها فقط، نُكمِل تطبيع RFID الحقيقي المخزَّن لها.
+            cart_rfid = normalize_rfid(cart.rfid_uid)
+
+    # إغلاق أي جلسة نشطة قديمة *لنفس العربة* أيضاً، بغض النظر عن المستخدم —
+    # وإلا ممكن يصير عندنا جلستان ACTIVE لنفس العربة (مستخدم قديم ما
+    # سكّرها صح + مستخدم جديد)، وهو بالضبط اللي صار بقاعدة البيانات
+    # (Session 77 و Session 101 كلاهما ACTIVE لنفس cart_id=1).
+    if cart:
+        stale_cart_sessions = db.query(ShoppingSession).filter(
+            ShoppingSession.cart_id == cart.id,
+            ShoppingSession.status == CartStatus.ACTIVE,
+        ).all()
+        for s in stale_cart_sessions:
+            s.status   = CartStatus.CANCELLED
+            s.ended_at = datetime.now(timezone.utc)
+        if stale_cart_sessions:
+            db.commit()
 
     session = ShoppingSession(
         user_id=current_user.id,
@@ -213,7 +245,17 @@ async def scan_product(
 
     # إعلام محرّك كشف السرقة (cv/theft_logic.py) أن هذا المنتج مُسِح شرعاً —
     # يُلغي أي شاشة تحذير حمراء معلّقة على نقطة البيع ومهلة تفعيل الفرامل.
-    theft_service.register_scanned_product(session_id, product.id)
+    #
+    # ⚠️ الأولوية لـ product.cv_category (تصنيف صريح يدوي من الأدمن يطابق
+    # فئات YOLO بالضبط — bottle/candy/chips/chocolate/nuts/pasta). التخمين
+    # القديم (category أو name) يبقى fallback فقط لو المنتج غير مُصنَّف
+    # بعد؛ كان يفشل دائماً لأي منتج اسمه عربي بالكامل (لا يحوي كلمة مثل
+    # "bottle" الإنجليزية إطلاقاً) — cv_category يحل هذا نهائياً بمطابقة
+    # تامة بدل تخمين نصّي تقريبي.
+    theft_service.register_scanned_product(
+        session_id, product.id,
+        product_label=(product.cv_category or product.category or product.name),
+    )
 
     # WebSocket update → Frontend
     await ws_manager.broadcast_to_session(session_id, {
@@ -267,10 +309,22 @@ async def remove_product(
     if not item:
         raise HTTPException(404, "Item not found in session")
 
+    # نجيب المنتج *قبل* الحذف حتى نعرف فئته لإعلام محرّك كشف السرقة
+    product = db.query(Product).filter(Product.id == product_id).first()
+
     db.delete(item)
     db.commit()
 
     new_total = _recalculate_total(session_id, db)
+
+    # إعلام محرّك كشف السرقة (cv/theft_logic.py) أن هذا المنتج حُذف شرعاً من
+    # الفاتورة — يُلغي أي تحذير "أُخرج من السلة ولم يُحذف" معلَّق على هذا
+    # المنتج (راجع cv/receipt_monitor.py::register_removal / try_consume_removal).
+    if product:
+        theft_service.register_removed_product(
+            session_id, product.id,
+            product_label=(product.cv_category or product.category or product.name),
+        )
 
     await ws_manager.broadcast_to_session(session_id, {
         "type": "cart_update",

@@ -44,6 +44,7 @@ def _serialize(product: Product) -> ProductOut:
         barcode=product.barcode,
         quantity=product.quantity or 0,
         category=product.category,
+        cv_category=product.cv_category,
         brand=product.brand,
         description=product.description,
         ingredients=split(product.ingredients),
@@ -126,6 +127,7 @@ def create_product(
     p = Product(
         name=req.name, name_ar=req.name_ar, price=req.price,
         barcode=req.barcode, quantity=req.quantity, category=req.category,
+        cv_category=req.cv_category,
         brand=req.brand, description=req.description,
         ingredients=json.dumps(req.ingredients or []),
         allergens=json.dumps(req.allergens or []),

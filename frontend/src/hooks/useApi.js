@@ -90,9 +90,22 @@ export const productApi = {
 
 // ─── Sessions (NEW — إدارة جلسات التسوق) ─────────────────────────────────────
 export const sessionApi = {
-  /** بدء جلسة تسوق جديدة عند تسجيل الدخول */
-  start:    (cartRfid = null) => api.post('/sessions/start', null, {
-    params: cartRfid ? { cart_rfid: cartRfid } : {},
+  /**
+   * بدء جلسة تسوق جديدة عند تسجيل الدخول.
+   *
+   * cartNumber هو الهوية الثابتة للعربة (مثلاً "CART-001" — مضبوطة مرة
+   * واحدة بـ VITE_CART_NUMBER على كل راسبيري باي ولا تتغيّر أبداً).
+   * الباك اند يسحب rfid_uid **الحالي** من قاعدة البيانات بنفسه، فأي
+   * تغيير يعمله الأونر على بطاقة RFID العربة من لوحة التحكم ينعكس فوراً
+   * بدون أي حاجة لإعادة بناء الفرونت اند.
+   *
+   * cartRfid تبقى مدعومة فقط للتوافق العكسي / الاختبار اليدوي.
+   */
+  start: (cartNumber = null, cartRfid = null) => api.post('/sessions/start', null, {
+    params: {
+      ...(cartNumber ? { cart_number: cartNumber } : {}),
+      ...(!cartNumber && cartRfid ? { cart_rfid: cartRfid } : {}),
+    },
   }),
   /** الجلسة النشطة الحالية للعميل */
   getActive: () => api.get('/sessions/active'),
@@ -176,6 +189,17 @@ export const onboardingApi = {
 export const theftApi = {
   listAlerts:   (params) => api.get('/theft/', { params }),
   resolveAlert: (alertId) => api.patch(`/theft/${alertId}/resolve`),
+
+  // زر "تفعيل السلة" بلوحة التحكم — يعني أن المشكلة حُلّت، فيُرسل الباك اند
+  // أمر تحرير الفرامل للراسبيري باي (MQTT + WebSocket) ويفكّ قفل العربة.
+  releaseCart:  (sessionId) => api.post(`/theft/session/${sessionId}/release-cart`),
+
+  // تحكّم يدوي مباشر بالفرامل (اختباري / حالات طارئة)
+  setBrake:     (sessionId, activate) =>
+    api.post(`/theft/session/${sessionId}/brake`, null, { params: { activate } }),
+
+  // أجهزة الراسبيري باي المتصلة حالياً ببثّ الكاميرا
+  devices:      () => api.get('/theft/devices'),
 }
 
 // ─── Admin Dashboard ──────────────────────────────────────────────────────────

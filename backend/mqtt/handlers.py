@@ -9,6 +9,7 @@ import logging
 from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 from core.database import SessionLocal
+from core.rfid_utils import normalize_rfid
 from mqtt.client import mqtt_service, Topics
 
 log = logging.getLogger("neoshop.mqtt.handlers")
@@ -39,7 +40,7 @@ async def handle_payment_request(topic: str, payload: dict):
     3. إرسال بيانات الفاتورة إلى ESP32 عبر MQTT
     4. تغيير الحالة إلى PAYMENT_IN_PROGRESS
     """
-    cart_rfid = payload.get("cart_rfid", "")
+    cart_rfid = normalize_rfid(payload.get("cart_rfid", ""))
     if not cart_rfid:
         log.warning("[MQTT] payment_request: missing cart_rfid")
         return
@@ -241,7 +242,7 @@ async def handle_payment_complete(topic: str, payload: dict):
     payment_id     = payload.get("payment_id")
     amount_inserted = payload.get("amount_inserted", 0.0)
     change_returned = payload.get("change_returned", 0.0)
-    cart_rfid      = payload.get("cart_rfid", "")
+    cart_rfid      = normalize_rfid(payload.get("cart_rfid", ""))
 
     if not payment_id:
         log.error("[MQTT] payment_complete: missing payment_id")
@@ -425,7 +426,7 @@ async def handle_refill_needed(topic: str, payload: dict):
 
 async def handle_cart_rfid(topic: str, payload: dict):
     """Raspberry Pi أبلغ عن قراءة RFID للعربة."""
-    cart_rfid = payload.get("cart_rfid", "")
+    cart_rfid = normalize_rfid(payload.get("cart_rfid", ""))
     event     = payload.get("event", "")
     log.info(f"[MQTT] Cart RFID read: {cart_rfid}, event={event}")
 

@@ -201,9 +201,13 @@ class MQTTService:
             **details
         })
 
-    def publish_brake_command(self, cart_rfid: str, activate: bool):
-        """التحكم بفرامل العربة."""
-        self.publish(Topics.BRAKE_CONTROL, {
+    def publish_brake_command(self, cart_rfid: str, activate: bool) -> bool:
+        """
+        التحكم بفرامل العربة (٤ سيرفوهات على درايفر PCA9685 بالراسبيري باي).
+        يُرجع True إذا نُشرت الرسالة فعلاً على الـ broker — يستخدمها
+        cv/alert_handler.py ليقرّر هل يعتمد على مسار الـ WebSocket البديل.
+        """
+        return self.publish(Topics.BRAKE_CONTROL, {
             "cart_rfid": cart_rfid,
             "brake": "activate" if activate else "release",
         })

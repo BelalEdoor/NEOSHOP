@@ -33,13 +33,18 @@ import models  # noqa: F401 — triggers __init__.py which imports all models
 
 # ─── Import routers ───────────────────────────────────────────────────────────
 from routers import auth, users, products, session, cart, payment
-from routers import invoices, theft, analysis, admin, navigation, camera
+from routers import invoices, theft, analysis, admin, navigation, camera, cv_preview
 from websocket_router import router as ws_router, manager as ws_manager
 from mqtt.client import mqtt_service
 from mqtt.handlers import setup_handlers
 import mqtt.handlers as mqtt_handlers
 from cv.theft_detection import theft_service
-from cv.alert_handler import handle_theft_alert
+from cv.alert_handler import (
+    handle_theft_alert,
+    handle_dashboard_alert,
+    handle_brake_command,
+    handle_alert_cleared,
+)
 
 log = logging.getLogger("neoshop.main")
 logging.basicConfig(level=logging.INFO)
@@ -57,10 +62,16 @@ async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
     log.info("✓ Database tables created")
 
-    # 2. تحميل YOLOv8
+    # 2. تحميل YOLOv8 وربط محرّك الرؤية الحاسوبية بباقي النظام
+    #    theft   → تسجيل بقاعدة البيانات + شاشة تحذير نقطة البيع (٨ ثوانٍ)
+    #    dashboard → إشعار لوحة التحكم (مع زر "تفعيل السلة" عند التصعيد)
+    #    brake     → أمر تفعيل الفرامل للراسبيري باي (MQTT + WebSocket)
     theft_service.load_model()
     theft_service.set_theft_callback(handle_theft_alert)
-    log.info("✓ YOLOv8 model loaded")
+    theft_service.set_dashboard_callback(handle_dashboard_alert)
+    theft_service.set_brake_callback(handle_brake_command)
+    theft_service.set_cleared_callback(handle_alert_cleared)
+    log.info(f"✓ YOLOv8 model loaded (ready={theft_service.is_ready})")
 
     # 3. تهيئة MQTT
     loop = asyncio.get_event_loop()
@@ -113,9 +124,10 @@ def _auto_seed():
 
         # إنشاء عربة افتراضية
         from models.cart import Cart
+        from core.rfid_utils import normalize_rfid
         if db.query(Cart).count() == 0:
-            db.add(Cart(cart_number="CART-001", rfid_uid="RFID-DEFAULT-001"))
-            db.add(Cart(cart_number="CART-002", rfid_uid="RFID-DEFAULT-002"))
+            db.add(Cart(cart_number="CART-001", rfid_uid=normalize_rfid("RFID-DEFAULT-001")))
+            db.add(Cart(cart_number="CART-002", rfid_uid=normalize_rfid("RFID-DEFAULT-002")))
             db.commit()
             log.info("✓ Default carts created")
 
@@ -218,6 +230,10 @@ app.include_router(analysis.router,  prefix="/api/analysis", tags=["AI Analysis"
 app.include_router(admin.router,      prefix="/api/admin",      tags=["Admin"])
 app.include_router(navigation.router, prefix="/api/navigation", tags=["Navigation"])
 app.include_router(camera.router,     prefix="/api/camera",     tags=["Camera"])
+
+# CV Preview (Debug) — أداة معاينة اختيارية، تقرأ فقط من cv/preview.py.
+# بدون بادئة /api عمداً لتطابق الرابط المطلوب: http://<HOST>:<PORT>/cv/preview
+app.include_router(cv_preview.router,  prefix="/cv",              tags=["CV Preview"])
 
 # WebSocket
 app.include_router(ws_router, tags=["WebSocket"])

@@ -85,11 +85,28 @@ const GROUP_ORDER = ['A', 'B1', 'B2', 'C']
 
 function useCartPosition(cartId) {
  const [pos, setPos] = useState(null)
+ // هل انقطعت الإشارة (تُقرأ علامة Aruco) ولو مرة وحدة من لحظة فتح الصفحة؟
+ // قبل أول انقطاع فعلي، ما بنعرض أي نقطة على الخريطة — حتى لو الباك اند
+ // رجّع بيانات جاهزة (موقع قديم من جلسة سابقة، أو قيم افتراضية)، لأنها
+ // مش بالضرورة تمثّل موقع العربة الفعلي الحالي.
+ const detectedOnceRef = useRef(false)
+
  useEffect(() => {
  if (!cartId) return
+ // إعادة الضبط عند تغيّر العربة (أو أول فتح للصفحة): نبلش من "لا نقطة"
+ // لحد ما توصل أول قراءة فيها aisle_id فعلي (يعني انقطعت إشارة حقيقية).
+ detectedOnceRef.current = false
+ setPos(null)
+
  const tick = () =>
  api.get(`/navigation/cart/${cartId}`)
- .then(({ data }) => setPos(data))
+ .then(({ data }) => {
+ if (data?.aisle_id) detectedOnceRef.current = true
+ // قبل أول إشارة حقيقية: تجاهل الرد تماماً (يبقى pos=null فمافي نقطة).
+ // بعد أول إشارة: مرّر البيانات كما هي دايماً (حتى لو رجعت aisle_id
+ // فاضية لاحقاً — هيك دخول/خروج الممرات الطبيعي يضل شغّال زي ما هو).
+ if (detectedOnceRef.current) setPos(data)
+ })
  .catch(() => {})
  tick()
  const id = setInterval(tick, 1000) // متابعة أسرع لمطابقة زمن استجابة القارئ (<= 1 ثانية)

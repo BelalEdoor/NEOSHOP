@@ -4,17 +4,20 @@ import React, { useEffect, useState, useRef } from 'react'
  * components/pos/TheftWarningModal.jsx
  * ======================================
  * الشاشة الحمراء المنبثقة على نقطة البيع عندما يرصد نظام الرؤية الحاسوبية
- * منتجاً وُضِع بالسلة دون مسح باركود (alert_type=UNSCANNED_IN_CART).
+ * منتجاً استقرّ داخل السلة (Zone B) دون أن تزيد الفاتورة
+ * (alert_type=PLEASE_SCAN_PRODUCT).
  *
- * تعرض عدّاً تنازلياً (افتراضياً 10 ثوانٍ، تُملَى من grace_seconds التي
- * يرسلها الباك اند — راجع cv/alert_handler.py) وتطلب من العميل إعادة مسح
- * المنتج فوراً. تُغلَق تلقائياً عند وصول:
+ * تعرض عدّاً تنازلياً مدته grace_seconds القادمة من الباك اند (٨ ثوانٍ —
+ * cv/config.py::SCAN_TIMEOUT) وتطلب من العميل إعادة مسح المنتج فوراً.
+ * العدّ هنا عرضي فقط: القرار الفعلي يُتّخذ على الخادم (theft_logic.py)،
+ * فحتى لو تجمّدت الواجهة أو أُعيد تحميلها لن يتأثر التصعيد.
+ * تُغلَق تلقائياً عند وصول:
  *   - "theft_alert_cleared"  → أعاد العميل المسح في الوقت المحدد.
  *   - "cart_locked" (locked=true) → انتهت المهلة والباك اند فعّل الفرامل
  *     فعلياً؛ عندها تتحول الشاشة لحالة "تم إيقاف السلة" بدل العدّ التنازلي.
  */
 export default function TheftWarningModal({ alert, locked, isAr, onDismiss }) {
-  const graceSeconds = alert?.grace_seconds || 10
+  const graceSeconds = alert?.grace_seconds || 8
   const [remaining, setRemaining] = useState(graceSeconds)
   const startRef = useRef(Date.now())
 

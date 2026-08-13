@@ -27,6 +27,37 @@ def hash_password(password: str) -> str:
 def verify_password(plain: str, hashed: str) -> bool:
     return pwd_context.verify(plain, hashed)
 
+# ─── RFID Normalization ─────────────────────────────────────────────────────
+# نقطة واحدة يعتمد عليها كل النظام لتوحيد شكل نص RFID UID.
+#
+# لماذا هذا ضروري؟
+#   كل مقارنة RFID بالنظام (routers/session.py، routers/cart.py،
+#   mqtt/handlers.py) كانت مقارنة نصية حرفية (==). أي اختلاف تنسيق بسيط
+#   بين الطرفين يكسر المطابقة تماماً، مثل:
+#
+#       القارئ الفعلي يرسل:      "D4:48:3A:D5"   (uppercase + فواصل نقطتين)
+#       الأونر أدخل بلوحة التحكم:  "d4483ad5"     (lowercase بدون فواصل)
+#                                  "D4-48-3A-D5"   (شرطات بدل نقطتين)
+#                                  " D4:48:3A:D5 " (مسافة زائدة بالنسخ واللصق)
+#
+#   كلها نفس البطاقة فعلياً، لكن المقارنة الحرفية تعتبرها قيماً مختلفة
+#   فتفشل مطابقة الفاتورة عند الدفع (رسالة "No PENDING_PAYMENT session
+#   for RFID=..." رغم أن العربة والجلسة صحيحتان).
+#
+# نطبّع كل قيمة RFID لنفس الشكل القانوني (uppercase، بدون أي رمز غير
+# أبجدي-رقمي) في كل نقطة تُكتَب أو تُقارَن فيها.
+def normalize_rfid(value: Optional[str]) -> Optional[str]:
+    """
+        normalize_rfid("D4:48:3A:D5")   -> "D4483AD5"
+        normalize_rfid(" d4-48-3a-d5 ") -> "D4483AD5"
+        normalize_rfid(None)            -> None
+        normalize_rfid("")              -> None
+    """
+    if not value:
+        return None
+    cleaned = re.sub(r"[^0-9A-Za-z]", "", value).upper()
+    return cleaned or None
+
 # ─── JWT ──────────────────────────────────────────────────────────────────────
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 

@@ -18,6 +18,16 @@ class Product(Base):
     barcode     = Column(String(100), unique=True, index=True, nullable=True)
     quantity    = Column(Integer, default=100)
     category    = Column(String(100), nullable=True)
+    # ─── ربط صريح بفئة موديل الرؤية الحاسوبية (YOLO) ──────────────────────
+    # ⚠️ لا تُستخدَم مطابقة الاسم/الفئة النصّية التقريبية بعد الآن للقرار
+    # الأمني — كانت تفشل دائماً لأي منتج اسمه عربي بالكامل (مثال: "قنينة
+    # حليب كامل الدسم" لا تحوي كلمة "bottle" الإنجليزية إطلاقاً). هذا
+    # الحقل يُحدَّد يدوياً بالأدمن فقط للمنتجات المُغطّاة فعلياً بنموذج
+    # YOLO المدرَّب (راجع cv/models/best.pt — القيم المتاحة حالياً:
+    # bottle, candy, chips, chocolate, nuts, pasta). باقي المنتجات تبقى
+    # None ولا تخضع لنظام كشف السرقة بالرؤية الحاسوبية إطلاقاً (منطقي —
+    # الموديل أصلاً لا "يعرف" شكلها).
+    cv_category = Column(String(50), nullable=True, index=True)
     brand       = Column(String(100), nullable=True)
     description = Column(Text, nullable=True)
     ingredients = Column(Text, nullable=True)  # Comma-separated
@@ -44,4 +54,3 @@ class Product(Base):
     is_on_offer    = Column(Boolean, default=False, nullable=False)
     old_price      = Column(Float, nullable=True)   # original price before discount
     offer_expires_at = Column(DateTime(timezone=True), nullable=True)  # null = no expiry
-

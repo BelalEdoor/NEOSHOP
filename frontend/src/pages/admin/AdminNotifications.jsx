@@ -16,7 +16,7 @@ import React, { useState, useEffect, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
-import { Coins, CheckCircle2, Loader2, Clock, History, RefreshCw, AlertCircle, Wrench, Trash2, ShieldAlert, MapPin, Lock } from 'lucide-react'
+import { Coins, CheckCircle2, Loader2, Clock, History, RefreshCw, AlertCircle, Wrench, Trash2, ShieldAlert, MapPin, Lock, Unlock } from 'lucide-react'
 import { paymentApi, theftApi } from '../../hooks/useApi'
 import { useRefillStore, useTheftStore } from '../../store'
 
@@ -41,6 +41,8 @@ export default function AdminNotifications() {
   const removeTheftBySession = useTheftStore(s => s.removeAlertBySession)
   const [resolvingId, setResolvingId] = useState(null)
 
+  const [releasingId, setReleasingId] = useState(null)
+
   const handleResolveTheft = async (alert) => {
     setResolvingId(alert.alert_id)
     try {
@@ -51,6 +53,27 @@ export default function AdminNotifications() {
       toast.error(err?.response?.data?.detail || (isAr ? 'تعذّر إغلاق التنبيه' : 'Could not resolve alert'))
     } finally {
       setResolvingId(null)
+    }
+  }
+
+  // ── زر "تفعيل السلة" ─────────────────────────────────────────────────
+  // الضغط عليه يعني أن المشكلة حُلّت: الباك اند يرسل أمر تحرير الفرامل
+  // للراسبيري باي (MQTT + WebSocket معاً)، يفكّ قفل العربة، يصفّر حالة
+  // محرّك الرؤية للجلسة حتى لا تُقفل فوراً من جديد، ويسجّل BRAKE_RELEASED
+  // بقاعدة البيانات مع إغلاق كل تنبيهات الجلسة المفتوحة.
+  const handleReleaseCart = async (alert) => {
+    setReleasingId(alert.session_id)
+    try {
+      await theftApi.releaseCart(alert.session_id)
+      removeTheftBySession(alert.session_id)
+      toast.success(isAr ? '🔓 تم تفعيل السلة وتحرير الفرامل' : '🔓 Cart re-enabled — brakes released')
+    } catch (err) {
+      toast.error(
+        err?.response?.data?.detail ||
+        (isAr ? 'تعذّر تفعيل السلة — تأكد من اتصال العربة' : 'Could not re-enable the cart — check the cart connection')
+      )
+    } finally {
+      setReleasingId(null)
     }
   }
 
@@ -166,8 +189,8 @@ export default function AdminNotifications() {
                     <div>
                       <p className="font-bold text-sm" style={{ color: 'var(--text)' }}>
                         {alert.brake_activated
-                          ? (isAr ? 'تم تفعيل فرامل العربة' : 'Cart brake activated')
-                          : (isAr ? 'منتج غير مسحوب داخل السلة' : 'Unscanned item in cart')}
+                          ? (isAr ? '🔒 تم تفعيل فرامل العربة' : '🔒 Cart brake activated')
+                          : (isAr ? 'منتج داخل السلة بانتظار المسح' : 'Item in cart awaiting scan')}
                       </p>
                       <p className="text-xs mt-0.5" style={{ color: 'var(--text3)' }}>
                         {isAr ? 'عربة' : 'Cart'} #{alert.cart_id ?? '—'} · {isAr ? 'جلسة' : 'session'} #{alert.session_id}
@@ -175,7 +198,22 @@ export default function AdminNotifications() {
                       </p>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {/* يظهر فقط بعد تفعيل الفرامل فعلياً — الضغط عليه يعني
+                        أن المشكلة حُلّت فتُحرَّر الفرامل وتُفكّ العربة */}
+                    {(alert.brake_activated || alert.can_release) && (
+                      <button
+                        onClick={() => handleReleaseCart(alert)}
+                        disabled={releasingId === alert.session_id}
+                        className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold text-white transition-all"
+                        style={{ background: releasingId === alert.session_id ? '#86efac' : '#059669' }}
+                      >
+                        {releasingId === alert.session_id
+                          ? <Loader2 className="w-4 h-4 animate-spin" />
+                          : <Unlock className="w-4 h-4" />}
+                        {isAr ? 'تفعيل السلة' : 'Re-enable cart'}
+                      </button>
+                    )}
                     <button
                       onClick={() => navigate(`/admin/map?cart=${alert.cart_id ?? ''}`)}
                       className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold text-white transition-all"
