@@ -11,8 +11,6 @@ import {
 import { cartApi } from '../hooks/useApi'
 import { formatPrice } from '../utils/format'
 
-const AI_BACKEND_URL = '' // Use Vite proxy: /analyze → http://localhost:8000
-
 export default function AIModelPage() {
   const { t } = useTranslation()
   const { user } = useAuthStore()
@@ -22,7 +20,7 @@ export default function AIModelPage() {
   const [barcodeVal, setBarcodeVal] = useState('')
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState(null)
-  // result: { product, allergenResult, aiAnalysis }
+  // result: { product, allergenResult, recEngine }
 
   useEffect(() => {
     if (barcodeRef.current) barcodeRef.current.focus()
@@ -53,28 +51,24 @@ export default function AIModelPage() {
       } catch {}
 
       // Show basic result immediately
-      setResult({ product, allergenResult, aiAnalysis: null, aiLoading: true })
+      setResult({ product, allergenResult, recEngine: null, recEngineLoading: true })
       setLoading(false)
 
-      // Fetch AI analysis
+      // Fetch health score + similar-product recommendations from the
+      // recommendation engine (routers/analysis.py::_recommendation_engine_extras)
       try {
-        const resp = await fetch(`${AI_BACKEND_URL}/analyze`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            query: product.name,
-            user_allergies: user?.allergies || [],
-            detailed_analysis: true,
-          }),
-        })
-        if (resp.ok) {
-          const data = await resp.json()
-          setResult((prev) => prev ? { ...prev, aiAnalysis: data.analysis, aiLoading: false } : null)
-        } else {
-          setResult((prev) => prev ? { ...prev, aiLoading: false } : null)
-        }
+        const { data } = await analysisApi.aiAnalysis(product.id)
+        setResult((prev) => prev ? {
+          ...prev,
+          recEngine: {
+            productHealth: data.product_health,
+            recommendations: data.recommendations || [],
+            available: data.recommendations_available,
+          },
+          recEngineLoading: false,
+        } : null)
       } catch {
-        setResult((prev) => prev ? { ...prev, aiLoading: false } : null)
+        setResult((prev) => prev ? { ...prev, recEngineLoading: false } : null)
       }
     } catch {
       toast.error('حدث خطأ')
@@ -208,35 +202,6 @@ export default function AIModelPage() {
             </div>
           </div>
 
-          {/* AI Analysis */}
-          <div className="card">
-            <div className="flex items-center gap-2 mb-3">
-              <Brain className="w-4 h-4" style={{ color: 'var(--primary)' }} />
-              <h3 className="font-bold" style={{ color: 'var(--text)' }}>{t('aiAnalysis')}</h3>
-              {result.aiLoading && <Loader2 className="w-4 h-4 animate-spin ms-auto" style={{ color: 'var(--primary)' }} />}
-            </div>
-            {result.aiLoading ? (
-              <div className="space-y-2">
-                <div className="h-3 rounded-full animate-pulse" style={{ background: 'var(--surface2)', width: '80%' }} />
-                <div className="h-3 rounded-full animate-pulse" style={{ background: 'var(--surface2)', width: '60%' }} />
-                <div className="h-3 rounded-full animate-pulse" style={{ background: 'var(--surface2)', width: '70%' }} />
-              </div>
-            ) : result.aiAnalysis ? (
-              <div className="text-sm leading-relaxed" style={{ color: 'var(--text2)' }}>
-                {typeof result.aiAnalysis === 'string' ? (
-                  <p>{result.aiAnalysis}</p>
-                ) : (
-                  <pre className="whitespace-pre-wrap font-sans">{JSON.stringify(result.aiAnalysis, null, 2)}</pre>
-                )}
-              </div>
-            ) : (
-              <p className="text-sm" style={{ color: 'var(--text3)' }}>
-                <Sparkles className="w-4 h-4 inline me-1" />
-                خدمة تحليل الذكاء الاصطناعي غير متاحة حالياً
-              </p>
-            )}
-          </div>
-
           {/* Alternatives */}
           {result.allergenResult.suggestions?.length > 0 && (
             <div className="card">
@@ -263,6 +228,80 @@ export default function AIModelPage() {
               </div>
             </div>
           )}
+
+          {/* ══ محرّك التوصيات — Health Score + منتجات مشابهة ══════════════ */}
+          <div className="card">
+            <div className="flex items-center gap-2 mb-3">
+              <Zap className="w-4 h-4" style={{ color: 'var(--primary)' }} />
+              <h3 className="font-bold" style={{ color: 'var(--text)' }}>
+                {t('recommendationEngine', 'محرّك التوصيات')}
+              </h3>
+              {result.recEngineLoading && <Loader2 className="w-4 h-4 animate-spin ms-auto" style={{ color: 'var(--primary)' }} />}
+            </div>
+
+            {result.recEngineLoading ? (
+              <div className="space-y-2">
+                <div className="h-3 rounded-full animate-pulse" style={{ background: 'var(--surface2)', width: '70%' }} />
+                <div className="h-3 rounded-full animate-pulse" style={{ background: 'var(--surface2)', width: '50%' }} />
+              </div>
+            ) : result.recEngine?.productHealth ? (
+              <div className="space-y-3">
+                <div className="flex items-center gap-4">
+                  <div>
+                    <p className="text-2xl font-extrabold" style={{ color: 'var(--primary)' }}>
+                      {result.recEngine.productHealth.health_score}
+                      <span className="text-sm font-semibold" style={{ color: 'var(--text3)' }}>/100</span>
+                    </p>
+                    <p className="text-xs" style={{ color: 'var(--text3)' }}>
+                      {t('healthScore', 'الدرجة الصحية')}
+                    </p>
+                  </div>
+                  <span
+                    className="text-xs px-2 py-1 rounded-full font-semibold"
+                    style={{ background: 'var(--surface2)', color: 'var(--text2)' }}
+                  >
+                    {result.recEngine.productHealth.risk_level}
+                  </span>
+                </div>
+
+                {result.recEngine.productHealth.warnings?.length > 0 && (
+                  <div className="flex flex-wrap gap-1">
+                    {result.recEngine.productHealth.warnings.map((w, i) => (
+                      <span key={i} className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-semibold">
+                        {w}
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                {result.recEngine.recommendations?.length > 0 && (
+                  <div>
+                    <p className="text-xs font-bold mb-2" style={{ color: 'var(--text2)' }}>
+                      {t('similarProducts', 'منتجات مشابهة موصى بها')}
+                    </p>
+                    <div className="space-y-2">
+                      {result.recEngine.recommendations.map((r) => (
+                        <div key={r.id} className="flex items-center justify-between p-2.5 rounded-xl" style={{ background: 'var(--surface2)' }}>
+                          <div className="min-w-0">
+                            <p className="text-sm font-bold truncate" style={{ color: 'var(--text)' }}>{r.name}</p>
+                            <p className="text-xs" style={{ color: 'var(--text3)' }}>{r.category}</p>
+                          </div>
+                          <span className="text-xs font-bold px-2 py-1 rounded-full flex-shrink-0" style={{ background: 'var(--primary-light)', color: 'var(--primary)' }}>
+                            {r.match_percentage}%
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <p className="text-sm" style={{ color: 'var(--text3)' }}>
+                <Sparkles className="w-4 h-4 inline me-1" />
+                {t('recommendationEngineUnavailable', 'محرّك التوصيات غير متاح حالياً (يحتاج فهرس بيانات مبني مسبقاً)')}
+              </p>
+            )}
+          </div>
         </div>
       )}
 

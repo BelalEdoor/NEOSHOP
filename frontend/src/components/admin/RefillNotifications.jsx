@@ -184,13 +184,22 @@ export default function RefillNotifications() {
               // position صراحةً حتى يتوضّع كبطاقة عادية أعلى الصفحة (نفس
               // مكان بقية التنبيهات)، بدل الاعتماد على الموضع الافتراضي
               // الذي كان يُظهره ملتصقاً بحافة الشاشة بلا مسافة واضحة.
+              //
+              // ⚠️ id ثابت مبني على session_id — هذا هو الإصلاح الأساسي:
+              // بدونه، كل حدث لاحق لنفس الجلسة (تحذير أصفر ثم أحمر، أو
+              // عدة تحذيرات متتالية) كان يفتح Toast منفصلاً جديداً فوق
+              // القديم بدل استبداله — فتتكدّس الإشعارات فوق بعضها وتصير
+              // الشاشة "معجوقة". react-hot-toast يستبدل تلقائياً أي toast
+              // بنفس الـ id بدل إضافة واحد جديد.
               {
+                id: `theft-${msg.data.session_id ?? 'unknown'}`,
                 duration: msg.data.brake_activated || msg.data.can_release ? Infinity : 8000,
                 position: 'top-center',
               }
             )
           } else if (msg.type === 'theft_alert_cleared' && msg.data?.session_id != null) {
             removeTheftBySession(msg.data.session_id)
+            toast.dismiss(`theft-${msg.data.session_id}`)
           }
         } catch { /* ignore malformed frames */ }
       }

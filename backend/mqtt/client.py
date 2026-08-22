@@ -88,11 +88,28 @@ class MQTTService:
         self._client.reconnect_delay_set(min_delay=1, max_delay=120)
 
         try:
-            self._client.connect(settings.MQTT_BROKER_HOST, settings.MQTT_BROKER_PORT, 60)
+            # FIXED — كان connect() (blocking). لو الـ broker مش متاح لحظة
+            # إقلاع الباك اند (لسا ما شتغل، تأخر بالشبكة، إلخ)، connect()
+            # كانت ترمي Exception فورًا، والـ except كان يلقطه *قبل* ما
+            # يوصل لسطر loop_start() — يعني ما كان يشتغل أي thread بالخلفية
+            # أبدًا، و self._connected تضل False للأبد (حتى لو الـ broker
+            # رجع يشتغل بعدها بثانية) لحد إعادة تشغيل الباك اند يدويًا.
+            # reconnect_delay_set فوق بيتحكم بإعادة الاتصال بعد انقطاع من
+            # اتصال ناجح سابقًا فقط — مش بمحاولة أولى فشلت من الأساس.
+            #
+            # connect_async() ما بتحجب (non-blocking) وما بترمي Exception
+            # لو الـ broker غير متاح لحظة الاستدعاء — بتفوّض عملية الاتصال
+            # (وإعادة المحاولة بالكامل حسب reconnect_delay_set) لـ
+            # loop_start()، يلي رح يستمر يحاول يتصل بالخلفية بغض النظر
+            # عن حالة الـ broker وقت إقلاع الباك اند.
+            self._client.connect_async(settings.MQTT_BROKER_HOST, settings.MQTT_BROKER_PORT, 60)
             self._client.loop_start()
             log.info(f"[MQTT] Connecting to {settings.MQTT_BROKER_HOST}:{settings.MQTT_BROKER_PORT} as {client_id}")
         except Exception as e:
-            log.warning(f"[MQTT] Could not connect: {e} — running without MQTT")
+            # لو صار استثناء هون (نادر مع connect_async، مثلاً خطأ بإعداد
+            # TLS أو باراميترات غلط)، على الأقل بنسجله بوضوح كخطأ (مش
+            # warning) لأنه معناه فعليًا "ما رح يشتغل MQTT إطلاقًا".
+            log.error(f"[MQTT] Failed to start MQTT loop: {e} — MQTT will be unavailable until restart")
 
     def _on_connect(self, client, userdata, flags, rc):
         if rc == 0:

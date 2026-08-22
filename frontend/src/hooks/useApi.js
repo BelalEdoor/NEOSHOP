@@ -172,6 +172,17 @@ export const analysisApi = {
     api.get(`/analysis/barcode-scan/${barcode}`),
 }
 
+// ─── Recommendation Engine (نظام التوصيات — recommendation/ package) ──────────
+export const recommendationApi = {
+  // تحليل منتج واحد: صحة + بدائل آمنة + توصيات مشابهة (routers/recommendations.py)
+  forProduct: (product_id) => api.get(`/recommendations/${product_id}`),
+}
+
+export const aiApi = {
+  // توصيات عامة لمستخدم بناءً على سجل مشترياته (routers/ai.py)
+  recommendationsForUser: (user_id) => api.get(`/ai/recommendations/${user_id}`),
+}
+
 // ─── Onboarding (allergies / health conditions picked right after register) ──
 export const allergensApi = {
   list: () => api.get('/analysis/allergens'),
@@ -207,6 +218,18 @@ export const adminApi = {
   overview:    () => api.get('/admin/overview'),
   topProducts: (limit = 10) => api.get('/admin/top-products', { params: { limit } }),
   salesSummary: () => api.get('/admin/sales-summary'),
+}
+
+// ─── Admin — تحليلات المتجر (Manager Analytics — AdminOverview.jsx) ────────────
+export const analyticsApi = {
+  sales:              () => api.get('/admin/analytics/sales'),
+  topProducts:        (limit = 10) => api.get('/admin/analytics/top-products', { params: { limit } }),
+  inventory:          () => api.get('/admin/analytics/inventory'),
+  productPerformance: (limit = 50) => api.get('/admin/analytics/product-performance', { params: { limit } }),
+  categoryPerformance: () => api.get('/admin/analytics/category-performance'),
+  inventoryAlerts:    () => api.get('/admin/analytics/inventory-alerts'),
+  salesTrends:        (days = 30) => api.get('/admin/analytics/sales-trends', { params: { days } }),
+  insights:           () => api.get('/admin/analytics/insights'),
 }
 
 // ─── Admin — حسابات العملاء (AdminCustomers.jsx) ───────────────────────────────

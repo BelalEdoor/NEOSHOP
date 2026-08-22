@@ -85,13 +85,8 @@ export default function DashboardPage() {
 
   const fetchAIAnalysis = async (product) => {
     try {
-      const resp = await fetch(`${AI_BACKEND_URL}/analyze`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: product.name, user_allergies: user?.allergies || [], detailed_analysis: false }),
-      })
-      if (!resp.ok) return null
-      const data = await resp.json()
-      return data.analysis || null
+      const { data } = await analysisApi.aiAnalysis(product.id)
+      return data || null
     } catch { return null }
   }
 

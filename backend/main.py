@@ -15,6 +15,13 @@ Distributed Smart Cart Architecture
   4. تسجيل MQTT handlers
   5. Seed البيانات الابتدائية
 """
+
+import os
+os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+os.environ.setdefault("VECLIB_MAXIMUM_THREADS", "1")
+
 import asyncio
 import time
 import logging
@@ -34,6 +41,8 @@ import models  # noqa: F401 — triggers __init__.py which imports all models
 # ─── Import routers ───────────────────────────────────────────────────────────
 from routers import auth, users, products, session, cart, payment
 from routers import invoices, theft, analysis, admin, navigation, camera, cv_preview
+from routers import recommendations, ai
+from analytics.router import router as analytics_router
 from websocket_router import router as ws_router, manager as ws_manager
 from mqtt.client import mqtt_service
 from mqtt.handlers import setup_handlers
@@ -225,9 +234,16 @@ app.include_router(theft.router,     prefix="/api/theft",    tags=["Theft Detect
 
 # Analysis (AI)
 app.include_router(analysis.router,  prefix="/api/analysis", tags=["AI Analysis"])
+# محرّك التوصيات — يحلل منتج واحد (صحة + بدائل + توصيات مشابهة) أو يجلب
+# توصيات عامة لمستخدم اعتماداً على سجل مشترياته (recommendation/ package).
+app.include_router(recommendations.router, prefix="/api/recommendations", tags=["Recommendations"])
+app.include_router(ai.router, tags=["AI Recommendations"])
 
 # Admin Dashboard
 app.include_router(admin.router,      prefix="/api/admin",      tags=["Admin"])
+# تحليلات لوحة الأدمن (مبيعات/مخزون/أداء منتجات) — موديل مستقل يقرأ فقط من
+# الفواتير والمنتجات الحالية، لا يعدّل أي بيانات.
+app.include_router(analytics_router,  prefix="/api/admin/analytics", tags=["Manager Analytics"])
 app.include_router(navigation.router, prefix="/api/navigation", tags=["Navigation"])
 app.include_router(camera.router,     prefix="/api/camera",     tags=["Camera"])
 

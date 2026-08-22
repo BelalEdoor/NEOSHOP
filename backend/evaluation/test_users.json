@@ -1,0 +1,22 @@
+[
+  {
+    "name": "Diabetes User",
+    "allergies": [],
+    "health_conditions": ["Diabetes"]
+  },
+  {
+    "name": "Hypertension User",
+    "allergies": [],
+    "health_conditions": ["Hypertension"]
+  },
+  {
+    "name": "Milk Allergy User",
+    "allergies": ["Milk"],
+    "health_conditions": []
+  },
+  {
+    "name": "Healthy User",
+    "allergies": [],
+    "health_conditions": []
+  }
+]

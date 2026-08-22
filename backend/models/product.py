@@ -18,6 +18,11 @@ class Product(Base):
     barcode     = Column(String(100), unique=True, index=True, nullable=True)
     quantity    = Column(Integer, default=100)
     category    = Column(String(100), nullable=True)
+    # ─── Subcategory (added for the Recommendation Engine) ─────────────────
+    # فئة فرعية أدق (مثال: Dairy → Milk, Bakery → Bread) — تُستخدم بمحرّك
+    # التوصيات (recommendation/) لحساب التشابه بين المنتجات واقتراح البدائل.
+    # اختيارية بالكامل، None لا يكسر أي منطق قديم يعتمد فقط على category.
+    subcategory = Column(String(100), nullable=True, index=True)
     # ─── ربط صريح بفئة موديل الرؤية الحاسوبية (YOLO) ──────────────────────
     # ⚠️ لا تُستخدَم مطابقة الاسم/الفئة النصّية التقريبية بعد الآن للقرار
     # الأمني — كانت تفشل دائماً لأي منتج اسمه عربي بالكامل (مثال: "قنينة
@@ -45,6 +50,24 @@ class Product(Base):
     sugar_g    = Column(Float, nullable=True)  # جرام سكر
     sodium_mg  = Column(Float, nullable=True)  # ملغرام صوديوم
     calories   = Column(Float, nullable=True)  # سعرات حرارية
+
+    # ─── Extended Nutrition (added for the Recommendation Engine) ─────────
+    # حقول إضافية اختيارية يستخدمها محرّك التوصيات لتحسين حساب health_score
+    # والمقارنة بين المنتجات (recommendation/health_checker.py، recommender.py).
+    # كلها Nullable — لا تكسر أي منتج قديم لم تُدخل له هذه القيم بعد.
+    protein_g        = Column(Float, nullable=True)  # جرام بروتين
+    fat_g            = Column(Float, nullable=True)  # جرام دهون
+    saturated_fat_g  = Column(Float, nullable=True)  # جرام دهون مشبعة
+    carbohydrates_g  = Column(Float, nullable=True)  # جرام كربوهيدرات
+    fiber_g          = Column(Float, nullable=True)  # جرام ألياف
+    cholesterol_mg   = Column(Float, nullable=True)  # ملغرام كوليسترول
+
+    # ─── Dietary Labels (added for the Recommendation Engine) ─────────────
+    # وسوم غذائية اختيارية تساعد بتصفية التوصيات (نباتي، خالي من الجلوتين...).
+    is_vegan         = Column(Boolean, default=False, nullable=False)
+    is_vegetarian    = Column(Boolean, default=False, nullable=False)
+    is_gluten_free   = Column(Boolean, default=False, nullable=False)
+    is_lactose_free  = Column(Boolean, default=False, nullable=False)
 
     # ─── Offers / Discounts (added) ────────────────────────────────────────
     # Real offer data set by the store owner via the admin panel, instead

@@ -81,6 +81,21 @@ class TrackedObject:
         # — راجع theft_logic.py::_evaluate_pending_return_session.
         self.just_created = True
 
+        # ── ⚠️ ذاكرة دائمة لكل منطقة (وليست لحظية) ─────────────────────────
+        # بعكس entered_cart/left_cart (لحظيّان — يصيران True فقط بالإطار
+        # الذي يحدث فيه العبور بالضبط، فيُفوَّتان لو لم يُحلَّل ذلك الإطار
+        # تحديداً بسبب تخطّي الإطارات ANALYZE_EVERY_N_FRAMES)، هذان الحقلان
+        # "يتذكّران" هل شُوهد هذا الجسم بكل منطقة *بأي وقت سابق على الإطلاق*
+        # طوال عمر هذا الـ track — بغضّ النظر عن كون الفريم الذي شهد ذلك
+        # حُلِّل بالضبط لحظة العبور أم لا. هذا يجعل القرار متيناً تماماً
+        # أمام تخطّي الإطارات دون الحاجة لتحليل كل فريم على حساب الأداء.
+        self.ever_seen_in_a = False
+        self.ever_seen_in_b = False
+        # علامتا "تمّ فحصه مرة واحدة" — تمنعان إعادة فتح نفس الفحص (دخول
+        # أو إرجاع) لنفس الـ track أكثر من مرة.
+        self.checked_entry = False
+        self.checked_return = False
+
         self._update_zone(frame_height)
 
     def _update_zone(self, frame_height: int):
@@ -92,6 +107,12 @@ class TrackedObject:
         self.previous_in_cart_zone = self.in_cart_zone
 
         self.in_cart_zone = (zone == "cart")
+
+        # تحديث الذاكرة الدائمة — مرة تصير True تبقى True لبقية عمر الـ track
+        if self.in_cart_zone:
+            self.ever_seen_in_b = True
+        else:
+            self.ever_seen_in_a = True
 
         self.entered_cart = (
             not self.previous_in_cart_zone
@@ -118,13 +139,17 @@ class TrackedObject:
             self.stable_in_cart = False
             self.placed_in_cart = False
 
-    def update(self, xyxy, frame_height: int, conf: float = None):
+    def update(self, xyxy, frame_height: int, conf: float = None, label: str = None):
 
         self.just_created = False  # هذا استدعاء لاحق، مو إنشاء جديد
 
         self.box = xyxy
         if conf is not None:
             self.conf = conf
+        if label is not None:
+            # شبكة أمان إضافية: حتى لو حدثت مطابقة خاطئة يوماً بمكان آخر
+            # بالكود، لا يبقى الـ track حاملاً تسمية قديمة خاطئة أبداً.
+            self.label = label
         self.last_seen = time.time()
 
         self._update_zone(frame_height)
@@ -176,6 +201,18 @@ class Tracker:
                 if tid in matched_tracks:
                     continue
 
+                # ⚠️ باگ جوهري كان هنا: المطابقة كانت تعتمد على IoU فقط
+                # (التداخل المكاني)، بدون أي شرط تطابق النوع (label). لو
+                # اكتشاف جديد من فئة مختلفة تماماً (مثلاً "chips") ظهر
+                # بمكان قريب من صندوق قديم متتبَّع من فئة أخرى (مثلاً
+                # "bottle" غادر للتوّ أو تراكب معه)، كان يُطابَق معه غلط
+                # ويرث الـ track القديم اسمه/حالته بالكامل — فتظهر تسمية
+                # خاطئة باللوق والتنبيهات (رأينا "chips" بثقة 0.93 يُطبع
+                # وبعدها "bottle" لنفس الاكتشاف بالضبط). لازم يتطابق النوع
+                # أولاً، ثم IoU بينهم فقط.
+                if obj.label != det["label"]:
+                    continue
+
                 score = _iou(det["xyxy"], obj.box)
 
                 if score > best_iou:
@@ -200,6 +237,7 @@ class Tracker:
                     det["xyxy"],
                     frame_height,
                     conf=det.get("conf"),
+                    label=det["label"],
                 )
 
                 matched_tracks.add(best_track)

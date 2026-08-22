@@ -17,6 +17,9 @@ from sqlalchemy import and_
 from typing import Optional, List
 from datetime import datetime, timezone
 import json
+import logging
+
+log = logging.getLogger("neoshop.session")
 
 from core.database import get_db
 from core.security import get_current_user, get_client_ip, audit
@@ -146,6 +149,19 @@ async def start_session(
     db.commit()
     db.refresh(session)
 
+    # ⚠️ شبكة أمان تشخيصية: كان إنشاء جلسة بلا عربة مرتبطة (cart_id=NULL)
+    # يحدث بصمت تامة بدون أي أثر بالسجل — فكل مرة كانت تصير، الاكتشاف
+    # الوحيد هو تحقيق يدوي لاحق بقاعدة البيانات. الآن يُطبَع تحذير صريح
+    # فوراً بلحظة الحدوث، يوضّح القيم المُستلَمة فعلياً (cart_rfid/
+    # cart_number) — يكفي لتحديد السبب مباشرة (طلب لم يُرفَق بأي منهما،
+    # أو قيمة أُرسلت لكن لم تُطابِق أي عربة بقاعدة البيانات).
+    if cart is None:
+        log.warning(
+            f"⚠️ Session {session.id} started WITHOUT a linked cart "
+            f"(cart_id=NULL) — received cart_rfid={cart_rfid!r}, cart_number={cart_number!r}. "
+            f"This session will be invisible to the camera/CV pipeline until re-linked."
+        )
+
     audit("session_start", current_user.id, ip, f"Session {session.id} started")
 
     # إشعار MQTT
@@ -246,15 +262,16 @@ async def scan_product(
     # إعلام محرّك كشف السرقة (cv/theft_logic.py) أن هذا المنتج مُسِح شرعاً —
     # يُلغي أي شاشة تحذير حمراء معلّقة على نقطة البيع ومهلة تفعيل الفرامل.
     #
-    # ⚠️ الأولوية لـ product.cv_category (تصنيف صريح يدوي من الأدمن يطابق
-    # فئات YOLO بالضبط — bottle/candy/chips/chocolate/nuts/pasta). التخمين
-    # القديم (category أو name) يبقى fallback فقط لو المنتج غير مُصنَّف
-    # بعد؛ كان يفشل دائماً لأي منتج اسمه عربي بالكامل (لا يحوي كلمة مثل
-    # "bottle" الإنجليزية إطلاقاً) — cv_category يحل هذا نهائياً بمطابقة
-    # تامة بدل تخمين نصّي تقريبي.
+    # ⚠️ عمداً cv_category وليس category: عمود category مستخدَم للتصنيف
+    # التجاري الحقيقي بالمتجر (Dairy/Bakery/Snacks/Beverages...) — الكتابة
+    # فوقه بقيم CV (bottle/chips/can) كانت ستكسر أي فلترة/عرض بالموقع
+    # يعتمد عليه، وأصلاً مش كل منتج بنفس الفئة التجارية شكله الفيزيائي
+    # واحد (منتجات "Beverages" مثلاً: بعضها قنينة، بعضها كرتونة). cv_category
+    # حقل منفصل اختياري — يُحدَّث بالجملة عبر مطابقة الاسم (bulk UPDATE)
+    # لكل المنتجات "شكلها قنينة فعلياً" دفعة وحدة، بدل صف صف.
     theft_service.register_scanned_product(
         session_id, product.id,
-        product_label=(product.cv_category or product.category or product.name),
+        product_label=product.cv_category,
     )
 
     # WebSocket update → Frontend
@@ -323,7 +340,7 @@ async def remove_product(
     if product:
         theft_service.register_removed_product(
             session_id, product.id,
-            product_label=(product.cv_category or product.category or product.name),
+            product_label=product.cv_category,
         )
 
     await ws_manager.broadcast_to_session(session_id, {

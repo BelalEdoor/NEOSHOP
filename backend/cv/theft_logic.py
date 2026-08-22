@@ -3,39 +3,47 @@ cv/theft_logic.py
 =================
 Production-style theft monitoring flow for the graduation project.
 
-سير العمل (بعد التعديل الجوهري الأخير — التتبّع يعتمد على لحظة العبور
-A→B، وفحص الفاتورة بنظام "استهلاك" غير حسّاس لترتيب الأحداث الزمني):
+سير العمل (بعد آخر تعديل جوهري — القرار يعتمد على "ذاكرة دائمة" للمنطقة
+لكل جسم متتبَّع، وليس على مسك لحظة العبور بالضبط):
 
     1. الكاميرا على العربة تبثّ الإطارات للباك اند عبر WebSocket.
     2. Zone A (أعلى الإطار) = منطقة المسح. Zone B (أسفل الإطار) = السلة.
        هندسة المنطقتين نفسها لم تتغيّر إطلاقاً.
-    3. القرار يُطلَق **مرة واحدة بالضبط، في اللحظة التي يعبر فيها المنتج
-       فعلياً من A إلى B** (حدث/edge وليس حالة/level). هذا الحدث متوفّر
-       جاهزاً من الـ Tracker: `entered_cart`.
-    3.5. ⚠️ بعد فتح "منتج معلّق"، عدّاد الوقت (GRACE_PERIOD → WARNING →
+    3. ⚠️ كل جسم متتبَّع (cv/tracker.py::TrackedObject) يحتفظ بحقلين
+       دائمين: `ever_seen_in_a` و`ever_seen_in_b` — يصيران True أول ما
+       يُشاهَد الجسم بتلك المنطقة *ولو مرة واحدة*، ويبقيان True لبقية
+       عمر الـ track بغضّ النظر عن الفريمات اللاحقة. هذا (بعكس
+       `entered_cart`/`left_cart` اللحظيَّين القديمَين) متين تماماً أمام
+       تخطّي الإطارات (`ANALYZE_EVERY_N_FRAMES`) — لا حاجة لتحليل كل فريم
+       على حساب الأداء لمسك لحظة العبور بالضبط.
+    4. ثلاث حالات فقط لفتح "فحص دخول" (obj.checked_entry يمنع التكرار):
+       أ) شُوهد الجسم بمنطقة A سابقاً، وهو الآن بمنطقة B ➜ دخول طبيعي
+          مؤكَّد — يُفتَح الفحص فوراً.
+       ب) لم يُشاهَد أبداً بمنطقة A، لكنه استقرّ بمنطقة B فترة
+          (`stable_in_cart`, نصف ثانية) دون حركة ➜ "دخل دون أن نراه
+          يعبر" — يُعامَل كمرشّح سرقة، نفس فحص الدخول بالضبط.
+       ج) لم يُشاهَد بمنطقة A، ولسا غير مستقرّ بمنطقة B ➜ لا شيء بعد،
+          ننتظر (قد تكون يد عابرة أو حركة لم تكتمل).
+    5. بعد فتح "منتج معلّق"، عدّاد الوقت (GRACE_PERIOD → WARNING →
        SCAN_TIMEOUT → ALARM) يعمل بالكامل على الزمن الفعلي، **بغضّ النظر
        عن استمرار ظهور الغرض بالفريم من عدمه**. اختفاء الغرض بصرياً بعد
-       العبور (دخل جوا السلة/الكيس فعلياً — وهو أمر طبيعي ومتوقَّع تماماً،
-       وليس إشارة على أي شيء) لا يُلغي التنبيه المعلَّق ولا يوقف العدّاد.
-       الإلغاء الوحيد يصير عبر مسح باركود مطابق (try_consume) أو تصعيد
-       فعلي للفرامل بعد انتهاء المهلة.
-    4. في تلك اللحظة بالضبط: نطبع رسالة اكتشاف واضحة (نوع + دقّة)، ثم
-       رسالة "فحص الفاتورة"، ثم نحاول فوراً "استهلاك" رصيد مسح من نفس
-       الفئة (receipt_monitor.try_consume) — ⚠️ هذا يعمل بغضّ النظر عن
-       توقيت المسح: سواء انمسح الباركود *قبل* العبور (التسلسل الطبيعي:
-       مسح ثم وضع بالسلة) أو *بعده* (وضع بالسلة ثم مسح خلال المهلة).
-       التصميم القديم (checkpoint زمني) كان يفوّت الحالة الأولى بالكامل.
-    5. نجح الاستهلاك فوراً ➜ طباعة "تمت إضافة المنتج للفاتورة بشكل صحيح"
-       (أخضر) ولا يُفتح أي تنبيه إطلاقاً — الوضع سليم من اللحظة الأولى.
-    6. فشل الاستهلاك ➜ يُفتح "منتج معلّق"، ويُعاد تجربة try_consume في كل
-       تقييم لاحق (يغطّي مسحاً يصل خلال فترة الانتظار):
-       - لم يُستهلَك خلال GRACE_PERIOD (ثانيتان) ➜ تحذير أصفر على نقطة
-         البيع مدته SCAN_TIMEOUT (٨ ثوانٍ) يطلب مسح المنتج.
-       - انتهت الثواني الثمانية دون استهلاك ➜ إنذار PRODUCT_NOT_SCANNED:
-         تفعيل الفرامل + إشعار الداشبورد + تسجيل قاعدة البيانات.
-    7. أي منتج آخر تراه الكاميرا **مستقرّاً بالفعل داخل Zone B** (لم يعبر
-       الحدود الآن) يُتجاهَل تماماً — فحص الفاتورة يحدث فقط عند لحظة
-       العبور الفعلية، ليس بشكل مستمر لكل شيء داخل B.
+       ذلك (دخل جوا السلة/الكيس فعلياً — أمر طبيعي ومتوقَّع) لا يُلغي
+       التنبيه المعلَّق ولا يوقف العدّاد. الإلغاء الوحيد يصير عبر مسح
+       باركود مطابق (try_consume)، أو فحص إرجاع لاحق (البند ٧ أدناه)، أو
+       تصعيد فعلي للفرامل بعد انتهاء المهلة.
+    6. فحص الفاتورة بنظام "استهلاك" غير حسّاس لترتيب الأحداث الزمني
+       (receipt_monitor.try_consume) — يعمل سواء انمسح الباركود *قبل*
+       العبور (مسح ثم وضع بالسلة) أو *بعده* (وضع بالسلة ثم مسح خلال
+       المهلة). نجح فوراً ➜ أخضر، لا تنبيه. فشل ➜ GRACE_PERIOD (ثانيتان)
+       صمتاً، ثم تحذير أصفر (SCAN_TIMEOUT=٨ث)، ثم PRODUCT_NOT_SCANNED
+       (تفعيل فرامل + إشعار داشبورد + تسجيل قاعدة بيانات) إن لم يُستهلَك.
+    7. فحص الإرجاع (_evaluate_pending_return_session) بنفس فلسفة الذاكرة
+       الدائمة: أي جسم `ever_seen_in_b=True` (شُوهد بالسلة ولو مرة) وهو
+       الآن بمنطقة A ولم يُفحَص كإرجاع بعد (`checked_return`) ➜ فحص
+       "إرجاع" حصراً — بدون فرامل إطلاقاً، تحذير أصفر واحد بس إن لم
+       يُحذَف من الفاتورة. وإن كان فيه فحص دخول مفتوح فعلياً لنفس الـ
+       track لحظة هذا العبور، يُلغى بالكامل (تحذير/تصعيد) ويتحوّل كلياً
+       لفحص الإرجاع فقط.
 
 The tracker already provides the necessary cart interaction signals:
 - track_id
@@ -482,6 +490,51 @@ class TheftDetectionService:
         alerts += self._evaluate_pending_return_session(session_id)
         return alerts
 
+    def _open_entry_check(self, session_id: int, obj, now: float):
+        """
+        يفتح فحص الدخول الفعلي (عبور مؤكَّد A→B مباشرة، أو دخول سريع تأكَّد
+        بعد نافذة المراقبة) — مُستخرَجة بدالة مستقلة ليُعاد استخدامها من
+        كلا المسارين بدل تكرار نفس المنطق مرتين.
+        يرجع obj لو فُتح تنبيه أو انحلّ فوراً (✅)، أو None لو تم تجاوزه
+        (تحقّق حديثاً لنفس الفئة).
+        """
+        if self._was_recently_verified(session_id, obj.label):
+            obj.verified = True
+            log.info(colorize(
+                f"[CV] Session {session_id}: 🔁 '{obj.label}' re-detected "
+                f"(track #{obj.track_id}) — already verified recently, ignoring",
+                CYAN,
+            ))
+            return None
+
+        log.info(colorize(
+            f"[CV] Session {session_id}: 🚶 CROSSED A→B — "
+            f"product: {obj.label} | accuracy: {getattr(obj, 'conf', 0.0):.2f} (track #{obj.track_id})",
+            CYAN, bold=True,
+        ))
+        log.info(colorize(
+            f"[CV] Session {session_id}: 🔍 Checking invoice for '{obj.label}'...",
+            CYAN,
+        ))
+
+        if receipt_monitor.try_consume(session_id, obj.label):
+            obj.verified = True
+            self._mark_recently_verified(session_id, obj.label)
+            self._in_cart_incr(session_id, obj.label, +1)
+            log.info(colorize(
+                f"[CV] Session {session_id}: ✅ '{obj.label}' was added to the "
+                f"invoice correctly — no action needed",
+                GREEN, bold=True,
+            ))
+            return obj
+
+        self._pending_products[session_id] = _PendingProduct(
+            track_id=obj.track_id,
+            label=obj.label,
+            placed_time=now,
+        )
+        return obj
+
     # ── Pending scan workflow ────────────────────────────────────────────
     def _evaluate_pending_session(self, session_id: int) -> List[dict]:
         now = time.time()
@@ -489,10 +542,18 @@ class TheftDetectionService:
         pending = self._pending_products.get(session_id)
         alerts: List[dict] = []
 
-        # ── فتح حلقة تنبيه جديدة: لحظة عبور منتج من Zone A إلى Zone B ──────
-        # المُحفِّز `obj.entered_cart` — حدث لحظي (edge) يصير True مرة واحدة
-        # بالضبط بالإطار الذي يعبر فيه المنتج فعلياً الحدود من A إلى B.
-        # منتج "رابض" أصلاً داخل B (entered_cart=False) يُتجاهَل تماماً.
+        # ── فتح فحص دخول جديد — بالاعتماد على "ذاكرة المنطقة" الدائمة ──────
+        # (ever_seen_in_a/stable_in_cart) بدل اللحظة الآنية entered_cart —
+        # متين أمام تخطّي الإطارات (ANALYZE_EVERY_N_FRAMES)، ما بيحتاج نمسك
+        # فريم العبور بالظبط. ثلاث حالات فقط (بالضبط كما طُلب):
+        #
+        #   ١) شُوهد بمنطقة A سابقاً، وهلق بمنطقة B ➜ دخول طبيعي مؤكَّد.
+        #      (يفتح الفحص فوراً — لا داعي للانتظار، الدليل قوي أصلاً.)
+        #   ٢) لم يُشاهَد أبداً بمنطقة A، لكنه استقرّ بمنطقة B ولم يتحرّك
+        #      لفترة (stable_in_cart) ➜ دخل دون أن نراه بمنطقة A — يُعامَل
+        #      كمرشّح سرقة (نفس فحص الدخول العادي بالضبط).
+        #   ٣) لم يُشاهَد بمنطقة A، ولسا غير مستقرّ بمنطقة B (احتمال يد
+        #      عابرة أو حركة لسا بالمنتصف) ➜ ننتظر، لا فحص بعد.
         if pending is None:
             if now < self._cooldown_until.get(session_id, 0.0):
                 return alerts
@@ -500,8 +561,16 @@ class TheftDetectionService:
             for obj in tracked.values():
                 if getattr(obj, "verified", False):
                     continue
-                if not getattr(obj, "entered_cart", False):
-                    continue
+                if getattr(obj, "checked_entry", False):
+                    continue  # سبق فحص هذا الـ track — لا تكرار
+                if not getattr(obj, "in_cart_zone", False):
+                    continue  # مو داخل Zone B حالياً أصلاً
+
+                seen_in_a = getattr(obj, "ever_seen_in_a", False)
+                settled = getattr(obj, "stable_in_cart", False)
+
+                if not seen_in_a and not settled:
+                    continue  # (٣) لسا مبكر — انتظر دورة تالية
 
                 # ── قمع إعادة الفتح لنفس المنتج الفعلي ─────────────────
                 # لو نفس الفئة اتحقّقت (✅) خلال آخر RECENT_VERIFIED_WINDOW
@@ -511,6 +580,7 @@ class TheftDetectionService:
                 # بصمت بدل فتح تنبيه زائف على منتج مُتحقَّق منه أصلاً.
                 if self._was_recently_verified(session_id, obj.label):
                     obj.verified = True
+                    obj.checked_entry = True
                     log.info(colorize(
                         f"[CV] Session {session_id}: 🔁 '{obj.label}' re-detected "
                         f"(track #{obj.track_id}) — already verified recently, ignoring",
@@ -518,43 +588,20 @@ class TheftDetectionService:
                     ))
                     continue
 
-                # (١) اكتشاف — نفس صيغة PRODUCT DETECTED المعتادة بالضبط
-                log.info(colorize(
-                    f"[CV] Session {session_id}: 🚶 CROSSED A→B — "
-                    f"product: {obj.label} | accuracy: {getattr(obj, 'conf', 0.0):.2f} (track #{obj.track_id})",
-                    CYAN, bold=True,
-                ))
-
-                # (٢) فحص الفاتورة — رسالة صريحة كما طُلب
-                log.info(colorize(
-                    f"[CV] Session {session_id}: 🔍 Checking invoice for '{obj.label}'...",
-                    CYAN,
-                ))
-
-                # ── محاولة استهلاك فورية ────────────────────────────────
-                # ⚠️ تعمل بغضّ النظر عن التوقيت: تلتقط مسحاً حصل *قبل*
-                # العبور (مسح ثم وضع بالسلة — التسلسل الطبيعي الأشيع) بقدر
-                # ما تلتقط مسحاً *بعد* العبور لاحقاً (عبر إعادة المحاولة
-                # أدناه كل تقييم أثناء فترة الانتظار).
-                if receipt_monitor.try_consume(session_id, obj.label):
-                    obj.verified = True
-                    self._mark_recently_verified(session_id, obj.label)
-                    self._in_cart_incr(session_id, obj.label, +1)
+                if not seen_in_a:
                     log.info(colorize(
-                        f"[CV] Session {session_id}: ✅ '{obj.label}' was added to the "
-                        f"invoice correctly — no action needed",
-                        GREEN, bold=True,
+                        f"[CV] Session {session_id}: 🕵️ '{obj.label}' (track #{obj.track_id}) "
+                        f"settled in Zone B without ever being seen in Zone A — "
+                        f"treating as a theft candidate",
+                        CYAN, bold=True,
                     ))
-                    continue  # وضع سليم — لا نفتح أي تنبيه لهذا الكائن
 
-                # لم يوجد مسح مطابق بعد — افتح "منتج معلّق" وابدأ الانتظار
-                self._pending_products[session_id] = _PendingProduct(
-                    track_id=obj.track_id,
-                    label=obj.label,
-                    placed_time=now,
-                )
-                pending = self._pending_products[session_id]
-                break
+                obj.checked_entry = True
+                result = self._open_entry_check(session_id, obj, now)
+                if result is not None:
+                    break
+
+            return alerts
 
         if pending is None:
             return alerts
@@ -654,18 +701,71 @@ class TheftDetectionService:
         alerts: List[dict] = []
 
         if pending is None:
+            # ── ⚠️ إشارة إرجاع مستهدَفة (جديدة، أضيق من المسار القديم
+            # المحذوف): لو فيه "فحص دخول" مفتوح فعلياً حالياً (منتج عبر
+            # A→B ولسا ما انحلّ)، وظهر track **جديد كلياً** بمنطقة A بنفس
+            # الفئة تحديداً — هذا سياق قوي وموثوق (مش تخمين عام كالمسار
+            # القديم): على الأغلب نفس الغرض "المفقود" (فقدت الكاميرا
+            # تتبّعه أثناء إخراجه بسرعة، فأعاد الـ Tracker اكتشافه بـ
+            # track_id جديد بمنطقة المسح). بعكس المسار القديم المحذوف
+            # (كان يفحص أي رصيد تاريخي "بالسلة" لأي غرض ثانٍ)، هذا مقيَّد
+            # حصراً بوجود فحص دخول *مفتوح الآن* لنفس الفئة — فلا يتأثر
+            # بشراء قطعة ثانية شرعية من نفس الصنف (حالة لا يوجد لها فحص
+            # دخول معلَّق أصلاً وقت ظهورها).
+            entry_pending = self._pending_products.get(session_id)
+            if entry_pending is not None:
+                for obj in tracked.values():
+                    if (
+                        getattr(obj, "just_created", False)
+                        and not getattr(obj, "in_cart_zone", True)
+                        and _labels_match(obj.label, entry_pending.label)
+                    ):
+                        log.info(colorize(
+                            f"[CV] Session {session_id}: 🔎 '{obj.label}' (track #{obj.track_id}) "
+                            f"re-appeared in Zone A matching the currently-open entry-check for "
+                            f"'{entry_pending.label}' — treating as the same item being returned, "
+                            f"cancelling entry-check, switching to return-check",
+                            CYAN,
+                        ))
+                        if entry_pending.warning_dispatched:
+                            self._dispatch_cleared(session_id)
+                        self._clear_pending_product(session_id)
+
+                        log.info(colorize(
+                            f"[CV] Session {session_id}: 🔍 Checking invoice for removal of "
+                            f"'{obj.label}'...",
+                            CYAN,
+                        ))
+                        self._in_cart_consume_one(session_id, obj.label)
+
+                        if receipt_monitor.try_consume_removal(session_id, obj.label):
+                            log.info(colorize(
+                                f"[CV] Session {session_id}: ✅ '{obj.label}' removal matched on "
+                                f"invoice — situation normal",
+                                GREEN, bold=True,
+                            ))
+                        else:
+                            self._pending_returns[session_id] = _PendingReturn(
+                                track_id=obj.track_id,
+                                label=obj.label,
+                                left_time=now,
+                            )
+                        return alerts
+
             for obj in tracked.values():
-                # ⚠️ شلنا هنا مسار احتياطي كان موجوداً ("RE-DETECTED IN ZONE A")
-                # يعتبر أي track جديد أول ظهور له بمنطقة A إرجاعاً لو فيه رصيد
-                # "بالسلة" من نفس الفئة. تبيّن أنه خطأ جوهري: **كل** منتج جديد
-                # يدخل السلة أصلاً يظهر أول مرة بمنطقة A قبل عبوره الطبيعي لـ B —
-                # فلو كان عندك أصلاً زجاجة بالسلة، أي زجاجة *ثانية* (شراء
-                # فعلي إضافي، مو إرجاع) كانت ستُفتَح كتنبيه إرجاع زائف فوراً
-                # لحظة ظهورها بمنطقة المسح، قبل ما تكمل مسارها الطبيعي أصلاً.
-                # المُحفِّز الوحيد الموثوق الآن هو `obj.left_cart` (عبور فعلي
-                # مُتتبَّع من B إلى A لنفس الجسم) — لا تخمين على tracks جديدة.
-                if not getattr(obj, "left_cart", False):
+                # ── ⚠️ المُحفِّز صار "ذاكرة دائمة" بدل اللحظة الآنية: أي
+                # جسم شُوهد بمنطقة B (ولو مرة واحدة، بأي وقت خلال عمر هذا
+                # الـ track) وهلق موجود بمنطقة A ولم يُفحَص كإرجاع من قبل
+                # — بغضّ النظر عن كون فريم لحظة العبور بالضبط قد حُلِّل أو
+                # لأ (متين أمام تخطّي الإطارات ANALYZE_EVERY_N_FRAMES).
+                if getattr(obj, "checked_return", False):
                     continue
+                if getattr(obj, "in_cart_zone", True):
+                    continue  # لسا بمنطقة B، مو بـA
+                if not getattr(obj, "ever_seen_in_b", False):
+                    continue  # ما كان بالسلة أبداً — لا علاقة له بالإرجاع
+
+                obj.checked_return = True
 
                 # ── ⚠️ لو نفس هذا الـ track كان له "فحص دخول" معلَّق (فتحناه
                 # سابقاً لحظة عبوره A→B) ولسا ما انحلّ، وهلق طلع إنه عبر فوراً

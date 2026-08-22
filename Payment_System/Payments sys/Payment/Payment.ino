@@ -10,9 +10,13 @@
  *   2. Receive invoice from Backend
  *   3. Accept coins AND banknotes until amount is fulfilled
  *      - Coins are counted directly via the CH-926 pulse train (unchanged).
- *      - Banknotes are validated on a Raspberry Pi (IR sensor + UV LED +
- *        camera + utils.fast_uv_validator) and reported to THIS board over
- *        a dedicated UART2 link — see "Raspberry Pi Banknote Link" below.
+ *      - Banknotes are DETECTED AND VALIDATED on a Raspberry Pi (IR sensor +
+ *        UV LED + camera + utils.fast_uv_validator) — that is the Pi's ONLY
+ *        job now. The Pi reports its verdict to THIS board over a dedicated
+ *        UART link — see "Raspberry Pi Banknote Link" below — and THIS
+ *        board is the one that physically swings the accept/reject gate
+ *        servo, on the same PCA9685 servo module already used for coin
+ *        change (see "Banknote Accept/Reject Gate Servo" below).
  *   4. Payment complete → Dispense physical change (PCA9685 servos + IR feedback, greedy algorithm)
  *      4a. If tubes run out mid-dispense (IR never confirms a drop after retries,
  *          for BOTH the failing denomination AND every smaller one) → PAUSE the
@@ -23,30 +27,57 @@
  *   5. Publish payment_complete → Backend confirms → Reset for next customer
  *
  * ─────────────────────────────────────────────────────────────────────────
- * Raspberry Pi Banknote Link (NEW)
+ * Raspberry Pi Banknote Link (Pi = detection/validation ONLY)
  * ─────────────────────────────────────────────────────────────────────────
- * The Raspberry Pi owns the banknote chamber entirely: IR insertion sensor,
- * UV LED, camera, the fast_uv_validator pipeline, and the accept/reject
- * servo gate. It never talks to MQTT or the backend directly — after every
- * banknote it sends exactly ONE line over this UART link, newline-terminated:
+ * The Raspberry Pi owns the banknote chamber's SENSING side only: IR
+ * insertion sensor, UV LED, camera, and the fast_uv_validator pipeline.
+ * It does NOT own a servo and does NOT touch the accept/reject gate
+ * anymore — that moved to this board (see below). The Pi never talks to
+ * MQTT or the backend directly — after every banknote it sends exactly
+ * ONE line over this UART link, newline-terminated:
  *
  *     VALID:<denomination>     e.g. "VALID:50"   — banknote accepted, worth
  *                               that many NIS. Treated exactly like a coin:
  *                               added to totalInserted, published to the
  *                               backend on payment/coins, and the TFT is
- *                               refreshed with the new running total.
+ *                               refreshed with the new running total. This
+ *                               board ALSO swings the banknote gate servo
+ *                               +45° (accept) and back to neutral.
  *     FAKE                                       — banknote rejected
  *                               (counterfeit / unreadable / no note). Shows
  *                               "REJECTED" on the TFT for
  *                               BANKNOTE_REJECT_DISPLAY_MS, then reverts to
  *                               the normal accepting-coins screen. Totals
  *                               are left completely untouched, mirroring
- *                               how an unknown coin is handled.
+ *                               how an unknown coin is handled. This board
+ *                               ALSO swings the banknote gate servo -45°
+ *                               (reject) and back to neutral.
  *
  * Banknote lines are only acted on while state == STATE_ACCEPTING_COINS —
  * exactly like inserted coins, a VALID/FAKE received outside that window
  * (e.g. before an invoice exists) is logged and ignored so a stray note fed
- * in at idle can't silently create a phantom balance.
+ * in at idle can't silently create a phantom balance (and the gate is left
+ * alone — it only moves in response to a verdict during an active sale).
+ *
+ * ─────────────────────────────────────────────────────────────────────────
+ * Banknote Accept/Reject Gate Servo (NEW — moved from the Pi to here)
+ * ─────────────────────────────────────────────────────────────────────────
+ * The MG996R gate servo that physically accepts or rejects a banknote used
+ * to be wired to, and driven by, the Raspberry Pi directly. It is now
+ * wired to CHANNEL 4 of the SAME PCA9685 servo module this board already
+ * uses for the four coin-change tubes — no new driver hardware, just one
+ * more channel on the existing module. The Pi no longer drives any servo
+ * at all; it only reports VALID/FAKE over UART (see above), and THIS
+ * board decides what the gate does:
+ *   - On "VALID:<denomination>"  → swingBanknoteGate(true)  → 55° (accept),
+ *     brief hold, back to neutral (105°).
+ *   - On "FAKE"                  → swingBanknoteGate(false) → 155° (reject),
+ *     brief hold, back to neutral (105°) — while "REJECTED" is shown on the TFT.
+ * These are ABSOLUTE angles measured directly on the physical gate with
+ * calibrate_channel4_servo.ino — NOT symmetric around neutral (accept is
+ * -50° from neutral, reject is +50° from neutral) and NOT tied to
+ * SERVO_REST_ANGLE (that constant is only the coin-tube servos' own
+ * reference point, unrelated to this gate). See BANKNOTE_SERVO_* below.
  *
  * Wiring:
  *   RC522:  SDA=5, RST=27, SCK=13, MISO=19, MOSI=23
@@ -60,17 +91,22 @@
  *     PCA9685 V+   -> +5V from separate external power supply (green terminal block)
  *     PCA9685 GND  -> shared GND with ESP32 and the external supply (same terminal block)
  *
- *     Servo -> PCA9685 channel mapping:
- *       1 Shekel  -> Channel 0
- *       2 Shekels -> Channel 1
- *       5 Shekels -> Channel 2
- *       10 Shekels-> Channel 3   (tube not physically installed yet, still programmed)
+ *     Servo -> PCA9685 channel mapping (CORRECTED to match actual physical wiring):
+ *       1 Shekel   -> Channel 0
+ *       2 Shekels  -> Channel 1
+ *       10 Shekels -> Channel 2   (tube not physically installed yet, still programmed)
+ *       5 Shekels  -> Channel 3
+ *       Banknote accept/reject gate -> Channel 4   (NEW — moved here from the Pi;
+ *                                                    MG996R, same servo that used
+ *                                                    to be wired to the Pi's GPIO18)
  *
  *   Change Return IR Sensors (confirm coin dropped):
  *     1 Shekel  -> GPIO 26
  *     2 Shekels -> GPIO 15
  *     5 Shekels -> GPIO 22
  *     10 Shekels-> GPIO 2    (not physically installed yet, still programmed)
+ *     (The banknote gate servo has no IR confirmation — it's a pass/block
+ *      gate, not a dispenser, so there's nothing to detect a "drop".)
  *
  *   1.8" TFT SPI Display (128x160, ST7735):
  *     Shares the SPI bus (SCK/MOSI) with the RC522 RFID reader; only CS/DC/RST are dedicated.
@@ -96,7 +132,11 @@
  *     L298N GND     -> shared GND (ESP32 + external supply)
  *     L298N +5V     -> leave disconnected (onboard regulator handles it
  *                      via the 5V jumper, if populated)
- *   Triggers briefly the moment coin-accepting starts (on invoice_ready).
+ *   Triggers briefly:
+ *     - the moment coin-accepting starts (on invoice_ready), AND
+ *     - immediately whenever GPIO 34 (CH-926 coin pulse line) goes active,
+ *       i.e. right as a coin pulse is detected, so the track keeps getting
+ *       settled while coins are actually being inserted/counted.
  *
  *   Raspberry Pi Banknote Link — plain USB cable, NOT GPIO wires:
  *     Plug a standard data-capable USB cable from the Raspberry Pi into
@@ -110,6 +150,8 @@
  *     physical UART carrying both. hardware/uart.py on the Pi side must
  *     use the matching 115200 baud and point UART_CONFIG.PORT at
  *     whatever /dev/ttyUSB* (or ttyACM*) device the ESP32 enumerates as.
+ *     The Pi no longer has any servo wiring at all — its GPIO18 (formerly
+ *     the gate servo signal pin) is now free.
  *
  *   NOTE (refill-pause flow):
  *     - returnChange() now RETURNS the remaining un-dispensed amount (int)
@@ -156,6 +198,30 @@
  *       accepted/rejected banknotes join the same totalInserted / TFT /
  *       backend flow as coins instead of needing a second, disconnected
  *       acceptance path.
+ *     - Corrected PCA_CH_5 / PCA_CH_10 channel definitions: they were
+ *       swapped relative to the actual physical wiring (channel 2 is
+ *       physically the 10-shekel tube servo, channel 3 is physically the
+ *       5-shekel tube servo). Fixed so the correct servo moves for each
+ *       denomination during change return.
+ *     - Added an ISR-safe flag (coinPulseSeen) so the vibration motor now
+ *       also fires immediately the instant GPIO 34 (the CH-926 coin pulse
+ *       line) goes active — not only on invoice_ready — without doing any
+ *       Serial/GPIO work inside the ISR itself.
+ *     - MOVED the banknote accept/reject gate servo from the Raspberry Pi
+ *       to this board: added PCA_CH_BANKNOTE (channel 4) on the existing
+ *       PCA9685, added swingBanknoteGate(), and wired it into
+ *       handleBanknoteValid()/handleBanknoteFake() so this board now
+ *       physically actuates the gate itself in direct response to the
+ *       Pi's VALID/FAKE verdicts, instead of the Pi doing it. The Pi's
+ *       hardware/servo.py was removed entirely on that side — the Pi's
+ *       only remaining job is detection + validation.
+ *     - Calibrated the banknote gate servo's three angles directly on the
+ *       physical hardware (using a standalone interactive serial sketch,
+ *       calibrate_channel4_servo.ino) instead of assuming a generic ±45°
+ *       swing off SERVO_REST_ANGLE: neutral=105°, accept=55° (-50° off
+ *       neutral), reject=155° (+50° off neutral). Updated
+ *       BANKNOTE_SERVO_NEUTRAL_ANGLE / _ACCEPT_ANGLE / _REJECT_ANGLE to
+ *       these measured absolute values.
  */
 
 #include <Arduino.h>
@@ -170,9 +236,9 @@
 #include <Adafruit_ST7735.h>
 
 // ─── WiFi & MQTT Config ───────────────────────────────────────────────────────
-const char* WIFI_SSID   = "C203";
-const char* WIFI_PASS   = "15159519";
-const char* MQTT_BROKER = "10.3.20.22";
+const char* WIFI_SSID   = "CELab";
+const char* WIFI_PASS   = "CELabC207";
+const char* MQTT_BROKER = "192.168.0.100";
 const int   MQTT_PORT   = 1883;
 const char* MQTT_USER   = "neoshop";
 const char* MQTT_PASS_S = "neoshop_mqtt_pass";
@@ -201,10 +267,18 @@ const char* TOPIC_REFILL_REQUEST   = "payment/refill_request"; // published when
 #define PCA_I2C_ADDR 0x40
 
 // ─── Change Return PCA9685 Channels ──────────────────────────────────────────
+// CORRECTED: channel 2 is physically wired to the 10-shekel tube servo and
+// channel 3 to the 5-shekel tube servo (opposite of what was previously
+// defined here) — see FIX LOG above.
 #define PCA_CH_1  0
 #define PCA_CH_2  1
-#define PCA_CH_5  2
-#define PCA_CH_10 3
+#define PCA_CH_10 2
+#define PCA_CH_5  3
+
+// ─── Banknote Accept/Reject Gate — PCA9685 Channel (NEW) ─────────────────────
+// Moved here from the Raspberry Pi (was gpiozero AngularServo on GPIO18).
+// Same PCA9685 module as the coin tubes above, one more channel.
+#define PCA_CH_BANKNOTE 4
 
 // ─── Change Return IR Sensor Pins ────────────────────────────────────────────
 #define IR_PIN_1  26
@@ -249,8 +323,27 @@ const char* TOPIC_REFILL_REQUEST   = "payment/refill_request"; // published when
 #define SERVO_PWM_MIN  102
 #define SERVO_PWM_MAX  512
 
+// ─── Banknote Gate Servo Calibration (NEW) ───────────────────────────────────
+// Measured directly on the physical gate with calibrate_channel4_servo.ino
+// (interactive serial calibration sketch) — these are ABSOLUTE angles fed
+// straight into setServoAngle(), independent of SERVO_REST_ANGLE (which is
+// only the coin-tube servos' own reference point, unrelated to this gate).
+// NOTE this gate's convention is NOT symmetric around neutral like the
+// coin tubes: accept swings DOWN 50° from neutral, reject swings UP 50°.
+//   105° -> neutral / resting (gate idle, measured)
+//    55° -> "accept" swing (VALID banknote), i.e. neutral - 50°
+//   155° -> "reject" swing (FAKE banknote), i.e. neutral + 50°
+#define BANKNOTE_SERVO_NEUTRAL_ANGLE  105
+#define BANKNOTE_SERVO_ACCEPT_ANGLE   55
+#define BANKNOTE_SERVO_REJECT_ANGLE   155
+#define BANKNOTE_SERVO_MOVE_DELAY     350   // time to let the servo physically swing
+#define BANKNOTE_SERVO_HOLD_DELAY     400   // dwell time at accept/reject before returning to neutral
+
 // ─── Per-Servo Calibration Offsets ───────────────────────────────────────────
-const int SERVO_OFFSET[4] = { 30, 32, 30, 30 };   // index = PCA9685 channel number
+// index = PCA9685 channel number. Index 4 (banknote gate) starts at 0 —
+// tune it the same way the coin-tube offsets were tuned, once the gate
+// servo is physically mounted.
+const int SERVO_OFFSET[5] = { 32, 34, 32, 32, 0 };
 
 // ─── Coin Denominations (Acceptor) ───────────────────────────────────────────
 struct Coin {
@@ -285,6 +378,11 @@ const int NUM_CHANNELS = 4;
 // ─── Coin ISR Variables ───────────────────────────────────────────────────────
 volatile int           pulseCount   = 0;
 volatile unsigned long lastPulseTime = 0;
+// Set (from the ISR) the instant a coin pulse is detected on GPIO 34.
+// Only ISR-safe work happens inside coinISR() itself (no Serial, no
+// digitalWrite/servo calls) — loop() polls this flag and does the actual
+// vibration-motor trigger.
+volatile bool          coinPulseSeen = false;
 const int DEBOUNCE_MS = 120;
 const int TIMEOUT_MS  = 400;
 
@@ -342,6 +440,7 @@ void IRAM_ATTR coinISR() {
   if (now - lastPulseTime > DEBOUNCE_MS) {
     pulseCount++;
     lastPulseTime = now;
+    coinPulseSeen = true;   // flag only — actual motor trigger handled in loop()
   }
 }
 
@@ -441,6 +540,19 @@ void updateVibrationMotor() {
   }
 }
 
+// Polled every loop() iteration — the instant coinISR() has flagged that
+// GPIO 34 went active (a coin pulse arrived), fire the vibration motor
+// right away. Kept out of the ISR itself since Serial/digitalWrite calls
+// inside startVibrationMotor() aren't ISR-safe.
+void checkCoinPulseVibration() {
+  if (coinPulseSeen) {
+    noInterrupts();
+    coinPulseSeen = false;
+    interrupts();
+    startVibrationMotor();
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Servo Helper (PCA9685)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -449,6 +561,31 @@ void setServoAngle(uint8_t channel, int angleDeg) {
   calibratedAngle = constrain(calibratedAngle, 0, 180);
   int pulse = map(calibratedAngle, 0, 180, SERVO_PWM_MIN, SERVO_PWM_MAX);
   pwm.setPWM(channel, 0, pulse);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Banknote Accept/Reject Gate Servo (NEW — see header comment for context)
+//
+// Swings PCA_CH_BANKNOTE to +45° (accept) or -45° (reject) off neutral,
+// holds briefly so the note actually clears the gate, then returns to
+// neutral. Uses safeDelay() (like dispenseOneCoin()) so MQTT stays alive
+// during the brief swing — this mirrors the coin-dispense pattern rather
+// than introducing a new non-blocking state machine, since the whole
+// swing is only ~1 second end-to-end.
+// ─────────────────────────────────────────────────────────────────────────────
+void swingBanknoteGate(bool accept) {
+  int targetAngle = accept ? BANKNOTE_SERVO_ACCEPT_ANGLE : BANKNOTE_SERVO_REJECT_ANGLE;
+
+  Serial.println(String("[Banknote Gate] Swinging ") + (accept ? "ACCEPT (+45)" : "REJECT (-45)"));
+
+  setServoAngle(PCA_CH_BANKNOTE, targetAngle);
+  safeDelay(BANKNOTE_SERVO_MOVE_DELAY);
+  safeDelay(BANKNOTE_SERVO_HOLD_DELAY);
+
+  setServoAngle(PCA_CH_BANKNOTE, BANKNOTE_SERVO_NEUTRAL_ANGLE);
+  safeDelay(BANKNOTE_SERVO_MOVE_DELAY);
+
+  Serial.println("[Banknote Gate] Back to neutral");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -482,8 +619,13 @@ void setupChangeReturnHardware() {
     pinMode(coinChannels[i].irPin, INPUT);
   }
 
+  // Banknote gate servo (channel 4) — rest at neutral, same as the coin
+  // tubes above. No IR pin for this one (see header comment).
+  setServoAngle(PCA_CH_BANKNOTE, BANKNOTE_SERVO_NEUTRAL_ANGLE);
+
   delay(300);
   Serial.println("[Change] Change return hardware ready (PCA9685 + IR)");
+  Serial.println("[Change] Banknote gate servo ready on PCA9685 channel " + String(PCA_CH_BANKNOTE));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -709,11 +851,13 @@ void checkForPaymentComplete() {
 //
 // Mirrors the coin-accepted / coin-rejected branches in loop() below so a
 // banknote and a coin are indistinguishable to the invoice/backend/TFT logic
-// from this point on; the only difference is where the value came from.
+// from this point on; the only difference is where the value came from —
+// AND that this board now also drives the physical accept/reject gate
+// servo itself, since the Pi doesn't touch it anymore (see header comment).
 // ─────────────────────────────────────────────────────────────────────────────
 void handleBanknoteValid(const String &denomStr) {
   if (state != STATE_ACCEPTING_COINS) {
-    Serial.println("[Banknote] VALID:" + denomStr + " received outside an active sale — ignoring");
+    Serial.println("[Banknote] VALID:" + denomStr + " received outside an active sale — ignoring (gate left alone)");
     return;
   }
 
@@ -735,6 +879,9 @@ void handleBanknoteValid(const String &denomStr) {
   banknoteRejectActive = false;   // a new result always takes priority over a stale alert
   showAcceptingScreen();
 
+  // Physically let the note through: swing the gate +45° and back.
+  swingBanknoteGate(true);
+
   checkForPaymentComplete();
 }
 
@@ -743,13 +890,17 @@ void handleBanknoteFake() {
                   String(totalDue, 2) + " | Inserted: " + String(totalInserted, 2));
 
   if (state != STATE_ACCEPTING_COINS) {
-    // Nothing on screen to protect (no active invoice) — just log it.
+    // Nothing on screen to protect (no active invoice) and no sale to
+    // protect the gate for — just log it, no servo movement outside a sale.
     return;
   }
 
   updateDisplayStatus("REJECTED", "Counterfeit / unreadable", "Try another note", ST77XX_RED);
   banknoteRejectActive    = true;
   banknoteRejectStartTime = millis();
+
+  // Physically block the note: swing the gate -45° and back.
+  swingBanknoteGate(false);
 }
 
 // Polled every loop() iteration — reverts the TFT back to the normal
@@ -896,7 +1047,8 @@ void setup() {
 
   // Raspberry Pi banknote link — over USB now, riding on the SAME Serial
   // (UART0) opened above at 115200. No separate Serial2.begin(): the Pi's
-  // USB cable IS this port. Nothing else to initialize here.
+  // USB cable IS this port. Nothing else to initialize here. The Pi only
+  // ever sends VALID:/FAKE — it no longer drives any servo on its side.
   Serial.println("[Pi-UART] Also listening for Raspberry Pi banknote "
                   "messages on this same USB/Serial link @ 115200 baud");
 
@@ -929,6 +1081,7 @@ void setup() {
   noInterrupts();
   pulseCount    = 0;
   lastPulseTime = 0;
+  coinPulseSeen = false;
   interrupts();
   Serial.println("[Coin] CH-926 ready on GPIO " + String(COIN_PIN));
 
@@ -972,6 +1125,9 @@ void loop() {
 
   // ── Vibration Motor (non-blocking timer) ────────────────────────────────────
   updateVibrationMotor();
+
+  // ── Vibration Motor — fire immediately on any GPIO 34 coin pulse ────────────
+  checkCoinPulseVibration();
 
   // ── Banknote "REJECTED" alert (non-blocking timer) ──────────────────────────
   updateBanknoteRejectAlert();

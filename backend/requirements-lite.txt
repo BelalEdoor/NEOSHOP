@@ -53,3 +53,8 @@ websockets>=12.0
 
 # --- Utils ---
 numpy
+
+# --- Recommendation Engine (optional — guarded by try/except, see requirements.txt) ---
+pandas
+faiss-cpu
+sentence-transformers

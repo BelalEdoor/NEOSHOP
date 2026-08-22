@@ -1,0 +1,22 @@
+[
+  {
+    "product": "Chocolate Bar",
+    "expected_warning": true,
+    "expected_alternative": true
+  },
+  {
+    "product": "Low Fat Milk",
+    "expected_warning": true,
+    "expected_alternative": true
+  },
+  {
+    "product": "Chicken Breast",
+    "expected_warning": false,
+    "expected_alternative": false
+  },
+  {
+    "product": "Potato Chips",
+    "expected_warning": true,
+    "expected_alternative": true
+  }
+]

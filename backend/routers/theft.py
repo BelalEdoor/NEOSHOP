@@ -19,12 +19,21 @@ router = APIRouter()
 
 
 def _to_out(t: TheftLog) -> TheftLogOut:
+    # نجيب بيانات العربة والعميل عبر علاقة session (إن وُجدت) — ضرورية
+    # لزر "مراجعة" بالداشبورد الذي يعرض رقم السلة/الجلسة/حساب العميل.
+    session = t.session
     return TheftLogOut(
         id=t.id, session_id=t.session_id,
         alert_type=t.alert_type.value if hasattr(t.alert_type, 'value') else t.alert_type,
         description=t.description, confidence_score=t.confidence_score,
         brake_activated=t.brake_activated, resolved=t.resolved,
         detected_at=t.detected_at,
+        resolved_at=t.resolved_at,
+        resolved_by_user_id=t.resolved_by_user_id,
+        cart_number=(session.cart.cart_number if session and session.cart else None),
+        cart_rfid=(session.cart_rfid if session else None),
+        customer_name=(session.user.name if session and session.user else None),
+        customer_email=(session.user.email if session and session.user else None),
     )
 
 

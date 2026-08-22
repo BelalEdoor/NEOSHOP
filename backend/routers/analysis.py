@@ -28,6 +28,10 @@ from models.recommendation_engine import (
 )
 from schemas import AnalysisRequest, AllergenResult, ProductOut, BarcodeScanlResult, OnboardingRequest, UserOut
 from routers.products import _serialize as _serialize_product
+from recommendation.user_profile import get_user_profile
+from recommendation.health_checker import check_product_health
+from recommendation.recommender import recommend
+from recommendation.alternative_generator import generate_safe_alternatives
 import json
 import os
 
@@ -201,6 +205,100 @@ async def _call_ai_backend(product_name: str, user_allergies: List[str]) -> Opti
     return None
 
 
+# ── Recommendation engine (health score + similar-product suggestions) ────────
+# يستخدم recommendation/ (get_user_profile + check_product_health + recommend)
+# لإرفاق درجة صحية دقيقة وتوصيات منتجات مشابهة مع نتيجة الفحص الحالية.
+# مغلّف بـ try/except لأن recommend() يحتاج فهرس FAISS مبني مسبقاً
+# (products.index/products.pkl) وحزمة sentence-transformers — إن لم تكن
+# جاهزة بعد (نشر جديد لم يُبنَ فيه الفهرس)، تستمر بقية الاستجابة بشكل طبيعي.
+def _recommendation_engine_extras(db: Session, user: User, product: Product) -> dict:
+    try:
+        profile = get_user_profile(user.id)
+    except Exception as e:
+        print(f"⚠️  Recommendation profile unavailable: {e}")
+        return {"product_health": None, "recommendations": [], "recommendations_available": False}
+
+    if profile is None:
+        return {"product_health": None, "recommendations": [], "recommendations_available": False}
+
+    product_data = {column.name: getattr(product, column.name) for column in product.__table__.columns}
+
+    try:
+        product_health = check_product_health(profile, product_data)
+    except Exception as e:
+        print(f"⚠️  Health checker failed: {e}")
+        product_health = None
+
+    product_text = " ".join([
+        str(product.name or ""),
+        str(product.category or ""),
+        str(getattr(product, "subcategory", "") or ""),
+        str(product.ingredients or ""),
+    ])
+
+    try:
+        recommendations = recommend(
+            product_id=product.id,
+            product_text=product_text,
+            profile=profile,
+            top_k=5,
+        )
+        recommendations_available = True
+    except Exception as e:
+        print(f"⚠️  Recommendation engine unavailable (index not built?): {e}")
+        recommendations = []
+        recommendations_available = False
+
+    # ── إذا المنتج غير صحي: تأكد إنه الاقتراحات فعلاً "أصح" منه ──────────────
+    # recommend() بيرجّع منتجات مشابهة نصياً (نفس الفئة/المكوّنات) بس ما
+    # بيضمن إنها أصح — أحياناً بترجّع منتج مشابه بنفس المستوى أو أسوأ، أو
+    # ولا نتيجة إذا كل الجيران الأقرب بالفهرس فيهم حساسية المستخدم. لهيك:
+    #   1) نفلتر نتائج recommend() ونبقي بس الأصح فعلياً (health_score أعلى
+    #      من صحة المنتج الممسوح نفسه).
+    #   2) لو ضلّ أقل من 3، نكمّل بـ generate_safe_alternatives() اللي
+    #      بيدوّر مباشرة بقاعدة البيانات على نفس الفئة/الفئة الفرعية —
+    #      مو معتمد على تغطية فهرس FAISS، فبيضمن نتيجة حتى لو الفهرس ناقص.
+    if product_health is not None and not product_health.get("safe", True):
+        own_score = product_health.get("health_score", 0)
+
+        def _score_of(rec: dict) -> int:
+            try:
+                return check_product_health(profile, rec).get("health_score", 0)
+            except Exception:
+                return 0
+
+        healthier = [r for r in recommendations if _score_of(r) > own_score]
+
+        if len(healthier) < 3:
+            try:
+                fallback = generate_safe_alternatives(db, profile, product_data, top_k=5)
+            except Exception as e:
+                print(f"⚠️  Safe-alternatives fallback failed: {e}")
+                fallback = []
+
+            existing_ids = {r["id"] for r in healthier}
+            for alt in fallback:
+                if alt["id"] in existing_ids or alt["id"] == product.id:
+                    continue
+                alt_health = check_product_health(profile, alt)
+                if alt_health.get("health_score", 0) <= own_score:
+                    continue
+                alt["match_percentage"] = alt_health.get("health_score", 0)
+                healthier.append(alt)
+                existing_ids.add(alt["id"])
+                if len(healthier) >= 5:
+                    break
+
+        healthier.sort(key=lambda r: r.get("match_percentage", 0), reverse=True)
+        recommendations = healthier[:5]
+
+    return {
+        "product_health": product_health,
+        "recommendations": recommendations,
+        "recommendations_available": recommendations_available,
+    }
+
+
 # ── Endpoints (same routes/response shapes as before) ─────────────────────────
 
 @router.post("/check", response_model=AllergenResult)
@@ -343,7 +441,8 @@ async def ai_analysis(
     if not is_safe:
         suggestions = [_serialize_product(p) for p in _find_safe_alternatives(db, product, allergy_names, current_user)]
 
-    ai_result = await _call_ai_backend(product.name, allergy_names)
+    ai_result = None  # AllerPredict AI الخارجي أُلغي — لم يكن مبنياً فعلياً، راجع routers/analysis.py::_call_ai_backend
+    engine_extras = _recommendation_engine_extras(db, current_user, product)
 
     warning_message = None
     if not allergen_check["is_safe"]:
@@ -361,6 +460,9 @@ async def ai_analysis(
         },
         "ai_analysis": ai_result.get("analysis") if ai_result else None,
         "ai_available": ai_result is not None,
+        "product_health": engine_extras["product_health"],
+        "recommendations": engine_extras["recommendations"],
+        "recommendations_available": engine_extras["recommendations_available"],
     }
 
 
@@ -404,7 +506,8 @@ async def scan_barcode(
     if not is_safe:
         suggestions = [_serialize_product(p) for p in _find_safe_alternatives(db, product, allergy_names, current_user)]
 
-    ai_result = await _call_ai_backend(product.name, allergy_names)
+    ai_result = None  # AllerPredict AI الخارجي أُلغي — لم يكن مبنياً فعلياً
+    engine_extras = _recommendation_engine_extras(db, current_user, product)
 
     warning_message = None
     if not allergen_check["is_safe"]:
@@ -423,4 +526,8 @@ async def scan_barcode(
         },
         "ai_analysis": ai_result.get("analysis") if ai_result else None,
         "ai_available": ai_result is not None,
+        "product_health": engine_extras["product_health"],
+        "recommendations": engine_extras["recommendations"],
+        "recommendations_available": engine_extras["recommendations_available"],
+        "is_food": True,
     }

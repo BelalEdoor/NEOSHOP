@@ -325,6 +325,14 @@ class TheftLogOut(BaseModel):
     brake_activated:  bool
     resolved:         bool
     detected_at:      Optional[datetime] = None
+    # ─── تفاصيل إضافية لزر "مراجعة" بالداشبورد (رقم السلة، الجلسة، حساب
+    # العميل، وقت الحل) — تُملأ عبر _to_out() بربط session بـ cart/user. ───
+    resolved_at:      Optional[datetime] = None
+    resolved_by_user_id: Optional[int]   = None
+    cart_number:      Optional[str]   = None
+    cart_rfid:        Optional[str]   = None
+    customer_name:    Optional[str]   = None
+    customer_email:   Optional[str]   = None
     class Config:
         from_attributes = True
 
