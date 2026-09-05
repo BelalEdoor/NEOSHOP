@@ -15,6 +15,11 @@ routers/navigation.py
   - قرأ نفس العلامة مرتين متتاليتين (0,0 / 1,1 / 2,2 / 3,3) → دخل ثم رجع
     وخرج من نفس نقطة الدخول (لم يقطع الممر إطلاقاً) → in_aisle=False فوراً
 
+  - أي علامة أخرى غير 0/1/2/3 (أي: ليست بحدود ممر) تُعامل كعلامة "قسم
+    منتجات": تُبحث بجدول Section عبر marker_id، وإذا وُجدت، تُحدَّث
+    current_section_id / pos_x / pos_y للعربة مباشرة (العربة خرجت من
+    الممر ووقفت عند قسم محدد).
+
 Endpoints:
   GET  /api/navigation/map
   GET  /api/navigation/cart/{cart_id}
@@ -88,15 +93,18 @@ class MarkerReadRequest(BaseModel):
     marker_id: int
 
 class CartPositionOut(BaseModel):
-    cart_id:         int
-    cart_number:     Optional[str]     = None   # المعرّف المطبوع على العربة، e.g. "CART-001"
-    last_marker_id:  Optional[int]    = None
-    aisle_id:        Optional[int]    = None
-    in_aisle:        bool             = False
-    direction:       Optional[str]    = None   # 'forward' | 'backward' | None (بعد اكتمال الحركة)
-    entry_direction: Optional[str]    = None   # اتجاه متوقّع فور الدخول للممر (قبل اكتمال الحركة)
-    section_name:    Optional[str]    = None
-    updated_at:      Optional[datetime] = None
+    cart_id:            int
+    cart_number:        Optional[str]     = None   # المعرّف المطبوع على العربة، e.g. "CART-001"
+    last_marker_id:     Optional[int]     = None
+    aisle_id:           Optional[int]     = None
+    in_aisle:           bool              = False
+    direction:          Optional[str]     = None   # 'forward' | 'backward' | None (بعد اكتمال الحركة)
+    entry_direction:    Optional[str]     = None   # اتجاه متوقّع فور الدخول للممر (قبل اكتمال الحركة)
+    section_name:       Optional[str]     = None
+    current_section_id: Optional[int]     = None   # ← جديد: القسم الحالي (لو العربة واقفة عند قسم)
+    pos_x:              Optional[float]   = None   # ← جديد: إحداثي X على الخريطة
+    pos_y:              Optional[float]   = None   # ← جديد: إحداثي Y على الخريطة
+    updated_at:         Optional[datetime] = None
 
 class PathRequest(BaseModel):
     cart_id:   int
@@ -192,6 +200,9 @@ def _status_to_out(status: CartLiveStatus, cart_number: Optional[str] = None) ->
         direction=status.direction,
         entry_direction=_entry_direction_of(status),
         section_name=status.section.name if status.section else None,
+        current_section_id=status.current_section_id,   # ← جديد
+        pos_x=status.pos_x,                              # ← جديد
+        pos_y=status.pos_y,                               # ← جديد
         updated_at=status.updated_at,
     )
 
@@ -339,6 +350,16 @@ async def marker_read(
 
        ج. ممر مختلف تماماً عن first_marker الحالي:
           → أعد تهيئة الممر الجديد (علامة جديدة تبدأ ممراً جديداً)
+
+    3. أي علامة ليست بحدود ممر (mid ليست بـ AISLE_MAP، أي ليست 0/1/2/3):
+       → تُعامل كعلامة "قسم منتجات". تُبحث بجدول Section عبر marker_id.
+       → إذا وُجد قسم مطابق: تُحدَّث current_section_id/pos_x/pos_y للعربة
+         مباشرة، وتخرج العربة من حالة "داخل ممر" (in_aisle=False).
+       → إذا لم يُوجد قسم مطابق (marker_id غير مسجّل): تُتجاهل بأمان
+         (فقط last_marker_id يتحدّث، بدون أي تغيير آخر).
+       (هذه الحالة كانت مفقودة بالكامل سابقاً — أي علامة قسم كانت تصل
+       للنقطة هذه ولا يحصل معها أي تحديث فعلي، فتبقى نقطة العربة ثابتة
+       على الخريطة رغم قراءة الكاميرا للعلامة بنجاح.)
     ─────────────────────────────────────────────────────────
     """
     cart = db.query(Cart).filter(Cart.id == req.cart_id).first()
@@ -358,6 +379,9 @@ async def marker_read(
     direction_result = None
 
     if aisle_info:
+        # العربة بمنتصف ممر الآن — لا تنتمي لقسم منتجات محدد لحظياً
+        status.current_section_id = None
+
         current_aisle, is_start = aisle_info
 
         if not status.in_aisle:
@@ -399,6 +423,19 @@ async def marker_read(
             status.first_marker_time = now
             status.direction         = None
 
+    else:
+        # ── حالة 3: علامة قسم منتجات (وليست علامة حدود ممر) ─────────────────
+        section = db.query(Section).filter(Section.marker_id == mid).first()
+        if section:
+            status.current_section_id = section.section_id
+            status.pos_x    = section.map_x
+            status.pos_y    = section.map_y
+            status.in_aisle = False
+            status.aisle_id = None
+            status.direction = None
+        # وإلا (علامة غير مسجّلة بأي قسم): تجاهلها بأمان — يبقى فقط
+        # last_marker_id محدَّثاً (لأغراض التصحيح فقط)، بدون أي تأثير آخر.
+
     # سجّل القراءة
     db.add(MarkerReadLog(cart_id=req.cart_id, marker_id=mid))
     db.commit()
@@ -416,12 +453,15 @@ async def marker_read(
             pass  # لا نفشل الطلب الأساسي بسبب مشكلة بثّ اختيارية
 
     return {
-        "success":   True,
-        "cart_id":   req.cart_id,
-        "marker_id": mid,
-        "aisle_id":  status.aisle_id,
-        "in_aisle":  status.in_aisle,
-        "direction": status.direction,
+        "success":            True,
+        "cart_id":            req.cart_id,
+        "marker_id":          mid,
+        "aisle_id":           status.aisle_id,
+        "in_aisle":           status.in_aisle,
+        "direction":          status.direction,
+        "current_section_id": status.current_section_id,
+        "pos_x":              status.pos_x,
+        "pos_y":              status.pos_y,
     }
 
 

@@ -1,9 +1,19 @@
 /**
  * NEOSHOP ESP32 — Payment Station (RFID + Coin Acceptor + Banknote Acceptor +
- *                                   Change Return + Refill Alert + TFT Display)
+ *                                   Change Return + Refill Alert)
  * =================================================================
  * RFID + CH-926 Coin Acceptor + Raspberry Pi Banknote Link + MQTT +
- * PCA9685 Servo Change Dispenser + IR Feedback + 1.8" TFT SPI Display
+ * PCA9685 Servo Change Dispenser + IR Feedback
+ *
+ * NOTE: The 1.8" TFT SPI Display (ST7735) has been REMOVED from this
+ * sketch — the physical unit appears burned out. All display-related
+ * code (Adafruit_GFX / Adafruit_ST7735 includes, the tft object,
+ * setupDisplay(), updateDisplayStatus(), showAcceptingScreen(), and every
+ * call site that used to update the screen) has been deleted. Nothing
+ * else was changed: WiFi, MQTT, Coin Acceptor, PCA9685, Servo, IR
+ * Sensors, Raspberry Pi UART link, Payment Logic, and RFID reading logic
+ * all behave exactly as before. A replacement display can be re-added
+ * later by restoring these pieces.
  *
  * Flow:
  *   1. Read RFID → Send payment_request
@@ -39,19 +49,15 @@
  *     VALID:<denomination>     e.g. "VALID:50"   — banknote accepted, worth
  *                               that many NIS. Treated exactly like a coin:
  *                               added to totalInserted, published to the
- *                               backend on payment/coins, and the TFT is
- *                               refreshed with the new running total. This
- *                               board ALSO swings the banknote gate servo
- *                               +45° (accept) and back to neutral.
+ *                               backend on payment/coins. This board ALSO
+ *                               swings the banknote gate servo +45°
+ *                               (accept) and back to neutral.
  *     FAKE                                       — banknote rejected
- *                               (counterfeit / unreadable / no note). Shows
- *                               "REJECTED" on the TFT for
- *                               BANKNOTE_REJECT_DISPLAY_MS, then reverts to
- *                               the normal accepting-coins screen. Totals
- *                               are left completely untouched, mirroring
- *                               how an unknown coin is handled. This board
- *                               ALSO swings the banknote gate servo -45°
- *                               (reject) and back to neutral.
+ *                               (counterfeit / unreadable / no note).
+ *                               Totals are left completely untouched,
+ *                               mirroring how an unknown coin is handled.
+ *                               This board ALSO swings the banknote gate
+ *                               servo -45° (reject) and back to neutral.
  *
  * Banknote lines are only acted on while state == STATE_ACCEPTING_COINS —
  * exactly like inserted coins, a VALID/FAKE received outside that window
@@ -60,7 +66,7 @@
  * alone — it only moves in response to a verdict during an active sale).
  *
  * ─────────────────────────────────────────────────────────────────────────
- * Banknote Accept/Reject Gate Servo (NEW — moved from the Pi to here)
+ * Banknote Accept/Reject Gate Servo (moved from the Pi to here)
  * ─────────────────────────────────────────────────────────────────────────
  * The MG996R gate servo that physically accepts or rejects a banknote used
  * to be wired to, and driven by, the Raspberry Pi directly. It is now
@@ -72,7 +78,7 @@
  *   - On "VALID:<denomination>"  → swingBanknoteGate(true)  → 55° (accept),
  *     brief hold, back to neutral (105°).
  *   - On "FAKE"                  → swingBanknoteGate(false) → 155° (reject),
- *     brief hold, back to neutral (105°) — while "REJECTED" is shown on the TFT.
+ *     brief hold, back to neutral (105°).
  * These are ABSOLUTE angles measured directly on the physical gate with
  * calibrate_channel4_servo.ino — NOT symmetric around neutral (accept is
  * -50° from neutral, reject is +50° from neutral) and NOT tied to
@@ -96,7 +102,7 @@
  *       2 Shekels  -> Channel 1
  *       10 Shekels -> Channel 2   (tube not physically installed yet, still programmed)
  *       5 Shekels  -> Channel 3
- *       Banknote accept/reject gate -> Channel 4   (NEW — moved here from the Pi;
+ *       Banknote accept/reject gate -> Channel 4   (moved here from the Pi;
  *                                                    MG996R, same servo that used
  *                                                    to be wired to the Pi's GPIO18)
  *
@@ -107,18 +113,6 @@
  *     10 Shekels-> GPIO 2    (not physically installed yet, still programmed)
  *     (The banknote gate servo has no IR confirmation — it's a pass/block
  *      gate, not a dispenser, so there's nothing to detect a "drop".)
- *
- *   1.8" TFT SPI Display (128x160, ST7735):
- *     Shares the SPI bus (SCK/MOSI) with the RC522 RFID reader; only CS/DC/RST are dedicated.
- *     VCC    -> 3.3V
- *     GND    -> GND (shared)
- *     CS     -> GPIO 4
- *     RESET  -> GPIO 17
- *     A0(DC) -> GPIO 16
- *     SDA    -> GPIO 23 (shared with RFID MOSI)
- *     SCK    -> GPIO 13 (shared with RFID SCK)
- *     LED    -> VCC directly (backlight always on, NOT GPIO-controlled)
- *     (SD card slot on the display board is NOT used)
  *
  *   Vibration Motor (settles coins on the acceptor's track) — driven via one
  *   channel of an L298N dual H-bridge driver module:
@@ -175,27 +169,27 @@
  *
  *   FIX LOG:
  *     - VIBRATION_MOTOR_PIN was previously mis-defined as GPIO 4, which
- *       collided with TFT_CS (also GPIO 4). That collision forced the TFT's
- *       chip-select LOW at boot (via digitalWrite(VIBRATION_MOTOR_PIN, LOW)
- *       in setup()), leaving the TFT permanently "selected" on the shared
- *       SPI bus and corrupting all RC522 communication (constant
- *       STATUS_ERROR / status=1 on every PICC_RequestA). Moved the
- *       vibration motor to GPIO 21, which was freed up after wiring the
- *       TFT backlight (LED) directly to VCC instead of a GPIO pin.
+ *       collided with the (now-removed) TFT's CS pin (also GPIO 4). That
+ *       collision forced the TFT's chip-select LOW at boot (via
+ *       digitalWrite(VIBRATION_MOTOR_PIN, LOW) in setup()), leaving the
+ *       TFT permanently "selected" on the shared SPI bus and corrupting
+ *       all RC522 communication (constant STATUS_ERROR / status=1 on
+ *       every PICC_RequestA). Moved the vibration motor to GPIO 21.
+ *       (The TFT itself has since been removed entirely from this sketch.)
  *     - Vibration motor was originally driven with a BLOCKING safeDelay()
  *       inside triggerVibrationMotor(), called synchronously from
  *       mqttCallback() on invoice_ready. At 800ms this was barely
  *       noticeable, but bumping it to a full 1-minute buzz would have
  *       frozen the ENTIRE device for that minute (no RFID reads, no coin
- *       processing, no display updates) since it's called from inside the
- *       MQTT callback. Rewrote as non-blocking: startVibrationMotor() turns
- *       the pin on and records a start time; updateVibrationMotor(), polled
- *       every loop() iteration, turns it back off once the duration has
- *       elapsed. The invoice screen and coin acceptance now work normally
+ *       processing) since it's called from inside the MQTT callback.
+ *       Rewrote as non-blocking: startVibrationMotor() turns the pin on
+ *       and records a start time; updateVibrationMotor(), polled every
+ *       loop() iteration, turns it back off once the duration has
+ *       elapsed. The invoice flow and coin acceptance now work normally
  *       while the motor buzzes in the background.
  *     - Added the Raspberry Pi banknote link over USB (Serial/UART0,
  *       shared with the debug console — no separate GPIO wires) so
- *       accepted/rejected banknotes join the same totalInserted / TFT /
+ *       accepted/rejected banknotes join the same totalInserted /
  *       backend flow as coins instead of needing a second, disconnected
  *       acceptance path.
  *     - Corrected PCA_CH_5 / PCA_CH_10 channel definitions: they were
@@ -222,6 +216,19 @@
  *       neutral), reject=155° (+50° off neutral). Updated
  *       BANKNOTE_SERVO_NEUTRAL_ANGLE / _ACCEPT_ANGLE / _REJECT_ANGLE to
  *       these measured absolute values.
+ *     - RFID reading rewritten from PICC_RequestA()-based polling (which
+ *       was unreliable in this project — STATUS_ERROR / status=1/4 on
+ *       every attempt) to PICC_IsNewCardPresent() + PICC_ReadCardSerial(),
+ *       confirmed working against the same RC522 + ESP32 hardware in an
+ *       isolated test. No RFID pins, SPI init, or downstream payment
+ *       logic were changed — only the detection call itself.
+ *     - REMOVED the 1.8" TFT SPI display (ST7735) entirely — the physical
+ *       unit is burned out. Deleted Adafruit_GFX/Adafruit_ST7735 includes,
+ *       the tft object, TFT_CS/RST/DC pin defines, setupDisplay(),
+ *       updateDisplayStatus(), showAcceptingScreen(), the TFT_CS
+ *       deselect lines in setup(), and every call site that used to push
+ *       status text to the screen. Nothing else changed. A new display
+ *       can be wired back in later.
  */
 
 #include <Arduino.h>
@@ -232,8 +239,6 @@
 #include <ArduinoJson.h>
 #include <Wire.h>
 #include <Adafruit_PWMServoDriver.h>
-#include <Adafruit_GFX.h>
-#include <Adafruit_ST7735.h>
 
 // ─── WiFi & MQTT Config ───────────────────────────────────────────────────────
 const char* WIFI_SSID   = "CELab";
@@ -275,10 +280,10 @@ const char* TOPIC_REFILL_REQUEST   = "payment/refill_request"; // published when
 #define PCA_CH_10 2
 #define PCA_CH_5  3
 
-// ─── Banknote Accept/Reject Gate — PCA9685 Channel (NEW) ─────────────────────
+// ─── Banknote Accept/Reject Gate — PCA9685 Channel ───────────────────────────
 // Moved here from the Raspberry Pi (was gpiozero AngularServo on GPIO18).
 // Same PCA9685 module as the coin tubes above, one more channel.
-#define PCA_CH_BANKNOTE 4
+#define PCA_CH_BANKNOTE 5
 
 // ─── Change Return IR Sensor Pins ────────────────────────────────────────────
 #define IR_PIN_1  26
@@ -286,14 +291,9 @@ const char* TOPIC_REFILL_REQUEST   = "payment/refill_request"; // published when
 #define IR_PIN_5  22
 #define IR_PIN_10 2
 
-// ─── TFT Display Pins (shares SCK/MOSI with the RC522 on the SPI bus) ───────
-// NOTE: LED (backlight) is wired directly to VCC now — no GPIO needed for it.
-#define TFT_CS    4
-#define TFT_RST   17
-#define TFT_DC    16
-
 // ─── Vibration Motor Pin (aligns coins on the track when coin-accepting starts) ─
-// Moved to GPIO 21 (was mistakenly GPIO 4, which collided with TFT_CS).
+// Moved to GPIO 21 (was mistakenly GPIO 4, which collided with the
+// now-removed TFT's CS pin).
 #define VIBRATION_MOTOR_PIN 21
 #define VIBRATION_DURATION_MS 60000   // how long the motor buzzes for (1 minute)
 
@@ -304,7 +304,7 @@ const char* TOPIC_REFILL_REQUEST   = "payment/refill_request"; // published when
 // there's no separate pin/baud pair here anymore; PI_LINK_BAUD must match
 // Serial.begin(...) in setup() since it's the same physical UART.
 #define PI_LINK_BAUD 115200
-#define BANKNOTE_REJECT_DISPLAY_MS 1200   // how long "REJECTED" stays on the TFT
+#define BANKNOTE_REJECT_DISPLAY_MS 1200   // kept for the non-blocking alert timer window (see below)
 
 // ─── IR Detection Calibration ────────────────────────────────────────────────
 #define IR_DETECTION_WINDOW  600
@@ -313,7 +313,7 @@ const char* TOPIC_REFILL_REQUEST   = "payment/refill_request"; // published when
 
 // ─── Change Return Calibration ───────────────────────────────────────────────
 #define SERVO_REST_ANGLE     90
-#define PUSH_DELTA_ANGLE    -35
+#define PUSH_DELTA_ANGLE    -38
 #define PUSH_DIRECTION       (+1)
 #define SERVO_PUSH_ANGLE     (SERVO_REST_ANGLE + (PUSH_DIRECTION * PUSH_DELTA_ANGLE))
 
@@ -323,7 +323,7 @@ const char* TOPIC_REFILL_REQUEST   = "payment/refill_request"; // published when
 #define SERVO_PWM_MIN  102
 #define SERVO_PWM_MAX  512
 
-// ─── Banknote Gate Servo Calibration (NEW) ───────────────────────────────────
+// ─── Banknote Gate Servo Calibration ─────────────────────────────────────────
 // Measured directly on the physical gate with calibrate_channel4_servo.ino
 // (interactive serial calibration sketch) — these are ABSOLUTE angles fed
 // straight into setServoAngle(), independent of SERVO_REST_ANGLE (which is
@@ -343,7 +343,7 @@ const char* TOPIC_REFILL_REQUEST   = "payment/refill_request"; // published when
 // index = PCA9685 channel number. Index 4 (banknote gate) starts at 0 —
 // tune it the same way the coin-tube offsets were tuned, once the gate
 // servo is physically mounted.
-const int SERVO_OFFSET[5] = { 32, 34, 32, 32, 0 };
+const int SERVO_OFFSET[5] = { 30, 32, 32, 28, 0 };
 
 // ─── Coin Denominations (Acceptor) ───────────────────────────────────────────
 struct Coin {
@@ -391,7 +391,6 @@ WiFiClient   wifiClient;
 PubSubClient mqtt(wifiClient);
 MFRC522      rfid(RFID_SS_PIN, RFID_RST_PIN);
 Adafruit_PWMServoDriver pwm(PCA_I2C_ADDR);
-Adafruit_ST7735 tft = Adafruit_ST7735(TFT_CS, TFT_DC, TFT_RST);
 
 // ─── Payment State Machine ────────────────────────────────────────────────────
 enum PaymentState {
@@ -427,8 +426,9 @@ bool          vibrationActive    = false;
 unsigned long vibrationStartTime = 0;
 unsigned long vibrationDuration  = VIBRATION_DURATION_MS;
 
-// ─── Banknote Reject Alert State (non-blocking, mirrors the coin-rejected /
-//     counterfeit-alert pattern used elsewhere in this project) ────────────────
+// ─── Banknote Reject Alert State (non-blocking timer; previously also drove
+//     the TFT "REJECTED" message — display removed, timer kept in case
+//     something downstream still keys off banknoteRejectActive) ─────────────
 bool          banknoteRejectActive    = false;
 unsigned long banknoteRejectStartTime = 0;
 
@@ -476,53 +476,10 @@ const char* getCoinLabel(int pulses) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// TFT Display Helpers
-// ─────────────────────────────────────────────────────────────────────────────
-void setupDisplay() {
-  // Backlight (LED) is wired directly to VCC now — always on, no GPIO control needed.
-  tft.initR(INITR_BLACKTAB);     // most common for this 128x160 V1.1 board
-  // If colors look swapped/inverted on your unit, try INITR_GREENTAB instead.
-  tft.setRotation(1);
-  tft.fillScreen(ST77XX_BLACK);
-  tft.setTextColor(ST77XX_WHITE);
-  tft.setTextSize(1);
-  tft.setCursor(5, 5);
-  tft.println("NEOSHOP");
-  tft.println("Scan your card...");
-
-  // FIX: Adafruit_ST7735's initR() internally calls SPI.begin() with no
-  // arguments, which resets SCK/MISO/MOSI/SS back to ESP32's default VSPI
-  // pins (18/19/23/5) and breaks the RC522, which needs SCK on GPIO 13.
-  // Re-assert our custom SPI pin mapping right after the display init.
-  SPI.begin(RFID_SCK_PIN, RFID_MISO_PIN, RFID_MOSI_PIN, RFID_SS_PIN);
-}
-
-void updateDisplayStatus(String line1, String line2 = "", String line3 = "", uint16_t color = ST77XX_WHITE) {
-  tft.fillScreen(ST77XX_BLACK);
-  tft.setTextColor(color);
-  tft.setCursor(5, 5);
-  tft.println(line1);
-  if (line2.length()) { tft.setCursor(5, 25); tft.println(line2); }
-  if (line3.length()) { tft.setCursor(5, 45); tft.println(line3); }
-  tft.setTextColor(ST77XX_WHITE); // reset default color for next call
-}
-
-// Redraws the normal "accepting coins/banknotes" screen — shared by the
-// coin-rejected flow and the new banknote-rejected flow so both revert to
-// exactly the same place.
-void showAcceptingScreen() {
-  updateDisplayStatus(
-    "Inserted: " + String(totalInserted, 2) + " NIS",
-    "Due: " + String(totalDue, 2) + " NIS",
-    "Left: " + String(max(0.0f, totalDue - totalInserted), 2) + " NIS"
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Vibration Motor — buzzes for `durationMs` to settle/align coins on the
 // acceptor's track, WITHOUT blocking the rest of the program (RFID reads,
-// coin processing, display updates, MQTT). Turned on here, turned back off
-// from updateVibrationMotor() which is polled every loop() iteration.
+// coin processing, MQTT). Turned on here, turned back off from
+// updateVibrationMotor() which is polled every loop() iteration.
 // ─────────────────────────────────────────────────────────────────────────────
 void startVibrationMotor(unsigned long durationMs = VIBRATION_DURATION_MS) {
   Serial.println("[Vibration] Motor ON (" + String(durationMs) + " ms)");
@@ -564,7 +521,7 @@ void setServoAngle(uint8_t channel, int angleDeg) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Banknote Accept/Reject Gate Servo (NEW — see header comment for context)
+// Banknote Accept/Reject Gate Servo (see header comment for context)
 //
 // Swings PCA_CH_BANKNOTE to +45° (accept) or -45° (reject) off neutral,
 // holds briefly so the note actually clears the gate, then returns to
@@ -664,7 +621,6 @@ int returnChange(int startingRemaining) {
 
   Serial.println("\n[Change] Starting change return");
   Serial.println("[Change] Amount due: " + String(remaining) + " NIS");
-  updateDisplayStatus("Dispensing change...", String(remaining) + " NIS");
 
   if (remaining <= 0) {
     Serial.println("[Change] No change to return");
@@ -676,7 +632,6 @@ int returnChange(int startingRemaining) {
 
     while (remaining >= channel.value) {
       Serial.println("[Change] Attempting to dispense: " + String(channel.label));
-      updateDisplayStatus("Dispensing:", channel.label, "Remaining: " + String(remaining) + " NIS");
 
       bool success = false;
       int attempts = 0;
@@ -726,7 +681,6 @@ void resetPaymentState() {
   banknoteRejectActive   = false;
   Serial.println("[System] State reset — Ready for next customer");
   Serial.println("[System] Waiting for RFID card...");
-  updateDisplayStatus("NEOSHOP", "Scan your card...");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -771,8 +725,6 @@ void publishPaymentComplete(bool changeDispensed) {
   Serial.println("[Payment] Dispensed:" + String(changeDispensed ? "YES" : "PARTIAL/NO"));
   Serial.println("════════════════════════════════════");
 
-  updateDisplayStatus("Payment Complete!", "Change: " + String(change, 2) + " NIS", "Thank you!", ST77XX_GREEN);
-
   paymentDoneTimestamp = millis();
 }
 
@@ -801,8 +753,6 @@ void publishRefillRequest() {
   Serial.println("[Refill] Alert sent to shop owner (topic: " + String(TOPIC_REFILL_REQUEST) + ")");
   Serial.println("[Refill] Payment PAUSED — waiting for refill_done confirmation...");
   Serial.println("════════════════════════════════════");
-
-  updateDisplayStatus("Please wait...", "Refilling change", "Owed: " + String(pendingChangeRemaining) + " NIS", ST77XX_YELLOW);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -850,7 +800,7 @@ void checkForPaymentComplete() {
 // Raspberry Pi Banknote Link — message handlers
 //
 // Mirrors the coin-accepted / coin-rejected branches in loop() below so a
-// banknote and a coin are indistinguishable to the invoice/backend/TFT logic
+// banknote and a coin are indistinguishable to the invoice/backend logic
 // from this point on; the only difference is where the value came from —
 // AND that this board now also drives the physical accept/reject gate
 // servo itself, since the Pi doesn't touch it anymore (see header comment).
@@ -877,7 +827,6 @@ void handleBanknoteValid(const String &denomStr) {
   publishCoinInserted(value, totalInserted);   // same event shape the backend already expects
 
   banknoteRejectActive = false;   // a new result always takes priority over a stale alert
-  showAcceptingScreen();
 
   // Physically let the note through: swing the gate +45° and back.
   swingBanknoteGate(true);
@@ -890,12 +839,10 @@ void handleBanknoteFake() {
                   String(totalDue, 2) + " | Inserted: " + String(totalInserted, 2));
 
   if (state != STATE_ACCEPTING_COINS) {
-    // Nothing on screen to protect (no active invoice) and no sale to
-    // protect the gate for — just log it, no servo movement outside a sale.
+    // No sale to protect the gate for — just log it, no servo movement outside a sale.
     return;
   }
 
-  updateDisplayStatus("REJECTED", "Counterfeit / unreadable", "Try another note", ST77XX_RED);
   banknoteRejectActive    = true;
   banknoteRejectStartTime = millis();
 
@@ -903,13 +850,12 @@ void handleBanknoteFake() {
   swingBanknoteGate(false);
 }
 
-// Polled every loop() iteration — reverts the TFT back to the normal
-// accepting screen once the "REJECTED" message has been shown long enough.
+// Polled every loop() iteration — clears the (display-less) reject alert
+// flag once BANKNOTE_REJECT_DISPLAY_MS has elapsed.
 void updateBanknoteRejectAlert() {
   if (banknoteRejectActive &&
       millis() - banknoteRejectStartTime >= BANKNOTE_REJECT_DISPLAY_MS) {
     banknoteRejectActive = false;
-    showAcceptingScreen();
   }
 }
 
@@ -977,13 +923,11 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
       Serial.println("[Payment] Amount due: " + String(totalDue, 2) + " NIS");
       Serial.println("[Payment] Insert coins or banknotes...");
 
-      updateDisplayStatus("Due: " + String(totalDue, 2) + " NIS", "Insert coins/notes");
       startVibrationMotor();   // buzz (non-blocking) to settle/align the coin track as we start accepting
 
     // ── No Invoice ────────────────────────────────────────────────────────
     } else if (event == "no_invoice") {
       Serial.println("[Payment] No invoice found — finish shopping first");
-      updateDisplayStatus("No invoice found", "Finish shopping first", "", ST77XX_RED);
       safeDelay(2500);
       resetPaymentState();
 
@@ -1008,7 +952,6 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
       }
 
       Serial.println("[Refill] Refill confirmed by shop owner. Resuming change dispense for invoice " + invoiceCode + "...");
-      updateDisplayStatus("Refill confirmed", "Resuming...");
       attemptChangeCompletion();
     }
   }
@@ -1036,14 +979,16 @@ void setup() {
   Serial.begin(115200);
   Serial.println("\n[NEOSHOP] Payment Station Starting...");
 
-  // On a shared SPI bus, every device's CS line must be HIGH (deselected)
-  // except the one currently being talked to. Deselect the TFT immediately,
-  // before any SPI traffic happens, so it doesn't interfere with the RC522.
-  pinMode(TFT_CS, OUTPUT);
-  digitalWrite(TFT_CS, HIGH);
-
   pinMode(VIBRATION_MOTOR_PIN, OUTPUT);
   digitalWrite(VIBRATION_MOTOR_PIN, LOW);
+
+  // The (now-removed) TFT display's CS line (GPIO 4) is still physically
+  // wired to the shared SPI bus (SCK/MOSI shared with the RC522). Left
+  // floating, it lets the disconnected/burned display interfere with
+  // RC522 communication. Pin it HIGH (deselected) so it stays silent on
+  // the bus — no display library or object involved, just this GPIO.
+  pinMode(4, OUTPUT);
+  digitalWrite(4, HIGH);
 
   // Raspberry Pi banknote link — over USB now, riding on the SAME Serial
   // (UART0) opened above at 115200. No separate Serial2.begin(): the Pi's
@@ -1086,7 +1031,6 @@ void setup() {
   Serial.println("[Coin] CH-926 ready on GPIO " + String(COIN_PIN));
 
   setupChangeReturnHardware();
-  setupDisplay();   // TFT display init — must come after SPI.begin() above
 
   Serial.println("[NEOSHOP] Ready! Waiting for RFID card...");
 }
@@ -1136,7 +1080,6 @@ void loop() {
   if (state == STATE_WAITING_INVOICE &&
       millis() - rfidTimestamp > RFID_TIMEOUT_MS) {
     Serial.println("[RFID] Timeout — no response from Backend");
-    updateDisplayStatus("Timeout", "No response from server", "", ST77XX_RED);
     safeDelay(1500);
     resetPaymentState();
   }
@@ -1153,42 +1096,31 @@ void loop() {
   if (state == STATE_IDLE && millis() - lastRFIDCheck > 500) {
     lastRFIDCheck = millis();
 
-    byte bufferATQA[2];
-    byte bufferSize = sizeof(bufferATQA);
-    MFRC522::StatusCode status = rfid.PICC_RequestA(bufferATQA, &bufferSize);
-
-    if (status != MFRC522::STATUS_TIMEOUT) {
-      Serial.println("[RFID][DEBUG] PICC_RequestA status = " + String(status));
-    }
-
-    if (status == MFRC522::STATUS_OK || status == MFRC522::STATUS_COLLISION) {
-      if (rfid.PICC_ReadCardSerial()) {
-        String uid = "";
-        for (byte i = 0; i < rfid.uid.size; i++) {
-          if (rfid.uid.uidByte[i] < 0x10) uid += "0";
-          uid += String(rfid.uid.uidByte[i], HEX);
-          if (i < rfid.uid.size - 1) uid += ":";
-        }
-        uid.toUpperCase();
-        rfid.PICC_HaltA();
-        rfid.PCD_StopCrypto1();
-
-        currentRFID   = uid;
-        state         = STATE_WAITING_INVOICE;
-        rfidTimestamp = millis();
-
-        Serial.println("[RFID] Card detected: " + uid);
-        Serial.println("[RFID] Fetching invoice from Backend...");
-        updateDisplayStatus("Card detected", uid, "Loading invoice...");
-
-        StaticJsonDocument<256> doc;
-        doc["cart_rfid"] = uid;
-        doc["event"]     = "payment_request";
-        doc["device_id"] = DEVICE_ID;
-        String payload;
-        serializeJson(doc, payload);
-        mqtt.publish(TOPIC_PAYMENT_REQUEST, payload.c_str(), false);
+    if (rfid.PICC_IsNewCardPresent() && rfid.PICC_ReadCardSerial()) {
+      String uid = "";
+      for (byte i = 0; i < rfid.uid.size; i++) {
+        if (rfid.uid.uidByte[i] < 0x10) uid += "0";
+        uid += String(rfid.uid.uidByte[i], HEX);
+        if (i < rfid.uid.size - 1) uid += ":";
       }
+      uid.toUpperCase();
+      rfid.PICC_HaltA();
+      rfid.PCD_StopCrypto1();
+
+      currentRFID   = uid;
+      state         = STATE_WAITING_INVOICE;
+      rfidTimestamp = millis();
+
+      Serial.println("[RFID] Card detected: " + uid);
+      Serial.println("[RFID] Fetching invoice from Backend...");
+
+      StaticJsonDocument<256> doc;
+      doc["cart_rfid"] = uid;
+      doc["event"]     = "payment_request";
+      doc["device_id"] = DEVICE_ID;
+      String payload;
+      serializeJson(doc, payload);
+      mqtt.publish(TOPIC_PAYMENT_REQUEST, payload.c_str(), false);
     }
   }
 
@@ -1216,16 +1148,12 @@ void loop() {
       publishCoinInserted(value, totalInserted);
 
       banknoteRejectActive = false;   // a coin result also clears a stale banknote alert
-      showAcceptingScreen();
 
       checkForPaymentComplete();
 
     } else {
       Serial.println("[Coin] REJECTED — unknown coin (" + String(pulses) + " pulses)");
-      updateDisplayStatus("Coin rejected", "Unknown coin", "", ST77XX_RED);
       safeDelay(1200);
-      // restore the normal "accepting coins" screen after showing the rejection
-      showAcceptingScreen();
     }
   }
 }

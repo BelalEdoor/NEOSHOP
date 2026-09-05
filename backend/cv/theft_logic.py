@@ -2,60 +2,6 @@
 cv/theft_logic.py
 =================
 Production-style theft monitoring flow for the graduation project.
-
-سير العمل (بعد آخر تعديل جوهري — القرار يعتمد على "ذاكرة دائمة" للمنطقة
-لكل جسم متتبَّع، وليس على مسك لحظة العبور بالضبط):
-
-    1. الكاميرا على العربة تبثّ الإطارات للباك اند عبر WebSocket.
-    2. Zone A (أعلى الإطار) = منطقة المسح. Zone B (أسفل الإطار) = السلة.
-       هندسة المنطقتين نفسها لم تتغيّر إطلاقاً.
-    3. ⚠️ كل جسم متتبَّع (cv/tracker.py::TrackedObject) يحتفظ بحقلين
-       دائمين: `ever_seen_in_a` و`ever_seen_in_b` — يصيران True أول ما
-       يُشاهَد الجسم بتلك المنطقة *ولو مرة واحدة*، ويبقيان True لبقية
-       عمر الـ track بغضّ النظر عن الفريمات اللاحقة. هذا (بعكس
-       `entered_cart`/`left_cart` اللحظيَّين القديمَين) متين تماماً أمام
-       تخطّي الإطارات (`ANALYZE_EVERY_N_FRAMES`) — لا حاجة لتحليل كل فريم
-       على حساب الأداء لمسك لحظة العبور بالضبط.
-    4. ثلاث حالات فقط لفتح "فحص دخول" (obj.checked_entry يمنع التكرار):
-       أ) شُوهد الجسم بمنطقة A سابقاً، وهو الآن بمنطقة B ➜ دخول طبيعي
-          مؤكَّد — يُفتَح الفحص فوراً.
-       ب) لم يُشاهَد أبداً بمنطقة A، لكنه استقرّ بمنطقة B فترة
-          (`stable_in_cart`, نصف ثانية) دون حركة ➜ "دخل دون أن نراه
-          يعبر" — يُعامَل كمرشّح سرقة، نفس فحص الدخول بالضبط.
-       ج) لم يُشاهَد بمنطقة A، ولسا غير مستقرّ بمنطقة B ➜ لا شيء بعد،
-          ننتظر (قد تكون يد عابرة أو حركة لم تكتمل).
-    5. بعد فتح "منتج معلّق"، عدّاد الوقت (GRACE_PERIOD → WARNING →
-       SCAN_TIMEOUT → ALARM) يعمل بالكامل على الزمن الفعلي، **بغضّ النظر
-       عن استمرار ظهور الغرض بالفريم من عدمه**. اختفاء الغرض بصرياً بعد
-       ذلك (دخل جوا السلة/الكيس فعلياً — أمر طبيعي ومتوقَّع) لا يُلغي
-       التنبيه المعلَّق ولا يوقف العدّاد. الإلغاء الوحيد يصير عبر مسح
-       باركود مطابق (try_consume)، أو فحص إرجاع لاحق (البند ٧ أدناه)، أو
-       تصعيد فعلي للفرامل بعد انتهاء المهلة.
-    6. فحص الفاتورة بنظام "استهلاك" غير حسّاس لترتيب الأحداث الزمني
-       (receipt_monitor.try_consume) — يعمل سواء انمسح الباركود *قبل*
-       العبور (مسح ثم وضع بالسلة) أو *بعده* (وضع بالسلة ثم مسح خلال
-       المهلة). نجح فوراً ➜ أخضر، لا تنبيه. فشل ➜ GRACE_PERIOD (ثانيتان)
-       صمتاً، ثم تحذير أصفر (SCAN_TIMEOUT=٨ث)، ثم PRODUCT_NOT_SCANNED
-       (تفعيل فرامل + إشعار داشبورد + تسجيل قاعدة بيانات) إن لم يُستهلَك.
-    7. فحص الإرجاع (_evaluate_pending_return_session) بنفس فلسفة الذاكرة
-       الدائمة: أي جسم `ever_seen_in_b=True` (شُوهد بالسلة ولو مرة) وهو
-       الآن بمنطقة A ولم يُفحَص كإرجاع بعد (`checked_return`) ➜ فحص
-       "إرجاع" حصراً — بدون فرامل إطلاقاً، تحذير أصفر واحد بس إن لم
-       يُحذَف من الفاتورة. وإن كان فيه فحص دخول مفتوح فعلياً لنفس الـ
-       track لحظة هذا العبور، يُلغى بالكامل (تحذير/تصعيد) ويتحوّل كلياً
-       لفحص الإرجاع فقط.
-
-The tracker already provides the necessary cart interaction signals:
-- track_id
-- label
-- in_cart_zone
-- entered_cart          ← المُحفِّز الحالي (edge-triggered، مرة واحدة فقط)
-- placed_in_cart / stable_in_cart   ← لم تعد تُستخدَم كمُحفِّز، فقط معلومة
-  حالة إضافية (تُستخدَم بالمعاينة cv/preview.py لتلوين الصندوق فقط)
-- last_seen
-
-This service keeps only one pending product at a time and uses the
-receipt monitor's consumption pool instead of the old scan-event logic.
 """
 import asyncio
 import logging
@@ -89,8 +35,6 @@ class _PendingState(str, Enum):
 
 @dataclass
 class _PendingProduct:
-    """Represents one product that has entered the cart and is awaiting scan."""
-
     track_id: int
     label: str
     placed_time: float
@@ -102,13 +46,6 @@ class _PendingProduct:
 
 @dataclass
 class _PendingReturn:
-    """
-    منتج خرج من السلة (B→A — إرجاع/سحب) وبانتظار التأكد من حذفه فعلياً من
-    الفاتورة. أبسط من _PendingProduct عمداً: لا تصعيد للفرامل هنا إطلاقاً
-    (المطلوب تحذير أصفر فقط)، فمرحلة واحدة كافية: WAITING → WARNING مرة
-    واحدة، ثم تُغلَق (بنجاح صامت أو بتحذير واحد لا يتكرر).
-    """
-
     track_id: int
     label: str
     left_time: float
@@ -116,8 +53,6 @@ class _PendingReturn:
 
 
 class TheftDetectionService:
-    """Singleton responsible for pending-product scan enforcement."""
-
     def __init__(self):
         self._detector: Optional[Any] = None
         self._on_theft_detected: Optional[Callable] = None
@@ -126,37 +61,21 @@ class TheftDetectionService:
         self._on_cleared_callback: Optional[Callable] = None
         self.tracker = Tracker()
 
-        # session_id -> _PendingProduct
         self._pending_products: Dict[int, _PendingProduct] = {}
-        # session_id -> _PendingReturn (منتج أُخرج من السلة، بانتظار تأكيد الحذف)
         self._pending_returns: Dict[int, _PendingReturn] = {}
-        # session_id -> timestamp: لا تُفتح حلقة تنبيه جديدة قبل انقضاء التهدئة
         self._cooldown_until: Dict[int, float] = {}
-        # session_id -> عدّاد إطارات، لتطبيق cv_config.ANALYZE_EVERY_N_FRAMES
         self._frame_counters: Dict[int, int] = {}
-        # session_id -> {label: last_verified_timestamp} — يمنع إعادة فتح
-        # تنبيه لنفس المنتج الفعلي لو الـ Tracker "خسر" الجسم وأعاد اكتشافه
-        # بـ track_id جديد بعد لحظات (اهتزاز/انقطاع لحظي بالتتبّع، ليس منتجاً
-        # ثانياً فعلياً) — راجع cv_config.RECENT_VERIFIED_WINDOW.
         self._recently_verified: Dict[int, Dict[str, float]] = {}
-        # session_id -> منذ متى الكاميرا "مغطّاة" بشكل مستمر (None = صافية الآن)
         self._obstruction_since: Dict[int, Optional[float]] = {}
-        # session_id -> timestamp: تهدئة بعد تنبيه تغطية سابق لنفس الجلسة
         self._obstruction_cooldown_until: Dict[int, float] = {}
-        # session_id -> آخر مرة طُبع فيها لوق المعايرة (📊) — throttling بسيط
         self._obstruction_last_debug: Dict[int, float] = {}
-        # session_id -> Counter({"bottle": 1, ...}) — كم قطعة من كل فئة
-        # "مفروض" تكون بالسلة حالياً (على مستوى الجلسة، غير مرتبط بأي
-        # track_id بعينه). يزيد لحظة تحقّق دخول ناجح، وينقص لحظة تحقّق
-        # خروج/إرجاع. يُستخدَم كخط دفاع احتياطي: لو غرض فقد تتبّعه وهو
-        # بالسلة ثم أُعيد اكتشافه بـ track_id جديد بمنطقة المسح (A)، لا
-        # يوجد "تاريخ" لهذا الـ track الجديد يثبت أنه *كان* بالسلة —
-        # فنعتمد هذا العدّاد بدل تتبّع الهوية الفردية.
         self._in_cart_count: Dict[int, Counter] = {}
+        # key (مثال: "no_theft_cb", "preview_fail:3") -> آخر وقت طُبعت فيه
+        # هذه الرسالة. تُستخدَم فقط لمنع تكرار رسائل التحذير/الخطأ نفسها
+        # كل فريم (راجع _throttled_log). لا تؤثر على القرارات، لوق فقط.
+        self._last_log_at: Dict[str, float] = {}
 
-    # ── Setup ─────────────────────────────────────────────────────────────
     def load_model(self):
-        """Load the YOLO detector once at application startup."""
         from cv.detector import Detector
         try:
             self._detector = Detector()
@@ -164,48 +83,59 @@ class TheftDetectionService:
             log.error(f"[CV] Failed to load YOLO model: {exc}")
 
     def set_theft_callback(self, callback: Callable):
-        """Register the theft callback: callback(session_id, alert_dict)."""
         self._on_theft_detected = callback
 
     def set_dashboard_callback(self, callback: Callable):
-        """Register the dashboard alert callback."""
         self._on_dashboard_alert = callback
 
     def set_brake_callback(self, callback: Callable):
-        """Register the brake callback."""
         self._on_brake_callback = callback
 
     def set_cleared_callback(self, callback: Callable):
-        """
-        Register the "alert cleared" callback: callback(session_id).
-        يُستدعى لحظة إلغاء تنبيه *سبق إرساله فعلاً* لنقطة البيع (وليس فقط
-        منع فتح تنبيه جديد) — الحالة الوحيدة الحالية: منتج عبر A→B وفُتح
-        له تحذير أصفر، ثم اتضح إنه مرّ مروراً سريعاً برّا (B→A) قبل أي
-        تصعيد. بدون هذا الاستدعاء، شاشة التحذير تبقى ظاهرة عند العميل
-        بلا داعٍ حتى ينتهي عدّها التنازلي من نفسه.
-        """
         self._on_cleared_callback = callback
 
     @property
     def is_ready(self) -> bool:
-        """هل نموذج YOLO محمَّل وجاهز؟ (يُستخدَم في /health)"""
         return self._detector is not None
 
-    # ── Session management ───────────────────────────────────────────────
+    # ── Logging helpers ──────────────────────────────────────────────────
+    def _throttled_log(self, key: str, level: int, message: str, interval: float = None):
+        """
+        يطبع نفس الرسالة (بنفس المفتاح `key`) أول مرة فوراً، وبعدها بحد
+        أقصى مرة كل `interval` ثانية — بدل إغراق اللوق بنفس السطر مئات
+        المرات لأن analyze_frame يستدعي هذه المسارات كل فريم (مثال:
+        callback غير مسجَّل، أو فشل نشر المعاينة). لا تُستخدَم لرسائل
+        الأحداث المهمة (عبور/تحذير/فرامل) التي أصلاً لا تتكرر كل فريم.
+        """
+        interval = getattr(cv_config, "LOG_THROTTLE_SECONDS", 30.0) if interval is None else interval
+        now = time.time()
+        if now - self._last_log_at.get(key, 0.0) < interval:
+            return
+        self._last_log_at[key] = now
+        log.log(level, message)
+
+    @staticmethod
+    def _factors_str(obj) -> str:
+        """
+        يبني سطر واحد يلخّص *كل* العوامل المؤثّرة على قرار هذا الجسم
+        المتتبَّع لحظة اتخاذه — يُلحَق بنهاية رسائل اللوق للحالات الفعلية
+        (عبور/تحذير/فرامل) حتى يمكن معرفة "ليش صار هيك بالضبط" من اللوق
+        وحده دون الحاجة لتشغيل مُصحِّح.
+        """
+        return (
+            f"[factors: track=#{getattr(obj, 'track_id', '?')} "
+            f"label={getattr(obj, 'label', '?')} "
+            f"conf={getattr(obj, 'conf', 0.0):.2f} "
+            f"in_cart_zone={getattr(obj, 'in_cart_zone', None)} "
+            f"ever_seen_in_a={getattr(obj, 'ever_seen_in_a', None)} "
+            f"ever_seen_in_b={getattr(obj, 'ever_seen_in_b', None)} "
+            f"stable_in_cart={getattr(obj, 'stable_in_cart', None)} "
+            f"checked_entry={getattr(obj, 'checked_entry', None)} "
+            f"checked_return={getattr(obj, 'checked_return', None)} "
+            f"verified={getattr(obj, 'verified', None)}]"
+        )
+
     def register_scanned_product(self, session_id: int, product_id: int, product_label: str = None):
-        """
-        Called by the POS when a barcode scan succeeds
-        (routers/session.py::scan_product) — أي: أُضيف سطر جديد للفاتورة.
-
-        product_label: تسمية عامة للمنتج (category أو name بقاعدة
-        البيانات، مثال: "bottle") — تضاف كرصيد بمسبح الاستهلاك
-        (receipt_monitor.register_scan)، بغضّ النظر عن توقيتها بالنسبة
-        للعبور A→B (راجع رأس هذا الملف لتفاصيل نظام الاستهلاك).
-
-        لو فيه "منتج معلّق" حالياً بنفس الفئة، نستهلك هذا المسح فوراً هنا
-        (بدل انتظار دورة التقييم القادمة) ونمسح التنبيه على الفور — أسرع
-        استجابة لنقطة البيع، ويمنع بقاء رصيد مكرَّر بالمسبح لنفس المسحة.
-        """
         receipt_monitor.register_scan(session_id, product_label)
         self._mark_tracked_verified(session_id, matching_label=product_label)
 
@@ -225,15 +155,6 @@ class TheftDetectionService:
             ))
 
     def register_removed_product(self, session_id: int, product_id: int, product_label: str = None):
-        """
-        Called by the POS when a product is removed from the invoice
-        (routers/session.py::remove_product) — أي: حُذف سطر من الفاتورة.
-
-        نظير register_scanned_product بالضبط لكن باتجاه معاكس (مسبح
-        "خروج" — راجع receipt_monitor.register_removal). لو فيه "منتج
-        مُرجَع معلَّق" حالياً بنفس الفئة، نستهلك هذا الحذف فوراً ونمسح
-        التحذير المعلَّق مباشرة.
-        """
         receipt_monitor.register_removal(session_id, product_label)
 
         if not product_label:
@@ -250,9 +171,13 @@ class TheftDetectionService:
             ))
 
     def _mark_recently_verified(self, session_id: int, label: str):
+        if not label:
+            return
         self._recently_verified.setdefault(session_id, {})[label.strip().lower()] = time.time()
 
     def _in_cart_incr(self, session_id: int, label: str, delta: int = 1):
+        if not label:
+            return
         counter = self._in_cart_count.setdefault(session_id, Counter())
         key = label.strip().lower()
         counter[key] = max(0, counter[key] + delta)
@@ -261,15 +186,14 @@ class TheftDetectionService:
 
     def _in_cart_has(self, session_id: int, label: str) -> bool:
         counter = self._in_cart_count.get(session_id)
-        if not counter:
+        if not counter or not label:
             return False
         needle = label.strip().lower()
         return any(_labels_match(needle, k) and v > 0 for k, v in counter.items())
 
     def _in_cart_consume_one(self, session_id: int, label: str) -> bool:
-        """يُستهلَك رصيد واحد من العدّاد لو وُجد؛ يرجع True لو نقص فعلاً."""
         counter = self._in_cart_count.get(session_id)
-        if not counter:
+        if not counter or not label:
             return False
         needle = label.strip().lower()
         for k in list(counter.keys()):
@@ -282,7 +206,7 @@ class TheftDetectionService:
 
     def _was_recently_verified(self, session_id: int, label: str) -> bool:
         table = self._recently_verified.get(session_id)
-        if not table:
+        if not table or not label:
             return False
         needle = label.strip().lower()
         now = time.time()
@@ -294,19 +218,12 @@ class TheftDetectionService:
         return False
 
     def acknowledge_session(self, session_id: int):
-        """
-        يُستدعى عندما يضغط الموظف زر "تفعيل السلة" بالداشبورد — أي أن
-        المشكلة حُلّت يدوياً. يُصفّر الحالة المعلّقة ويعلّم كل ما هو
-        متتبَّع الآن كـ verified حتى لا تُقفل العربة مباشرةً من جديد
-        بسبب نفس المنتج الموجود أصلاً داخل السلة.
-        """
         self._mark_tracked_verified(session_id)
         self._clear_pending_product(session_id)
         self._pending_returns.pop(session_id, None)
         self._cooldown_until[session_id] = time.time() + cv_config.ALERT_COOLDOWN
 
     def clear_session(self, session_id: int):
-        """Clear all per-session tracking and pending state."""
         self.tracker.clear_session(session_id)
         receipt_monitor.reset(session_id)
         self._pending_products.pop(session_id, None)
@@ -320,38 +237,20 @@ class TheftDetectionService:
         self._in_cart_count.pop(session_id, None)
 
     def _mark_tracked_verified(self, session_id: int, matching_label: str = None):
-        """
-        matching_label=None (الحالة اليدوية: acknowledge_session) ➜ يُعلَّم
-        كل الكائنات المتتبَّعة كـ verified بلا استثناء (تدخّل يدوي من
-        الموظف يغطّي كل شيء بالسلة، بغضّ النظر عن نوعه).
-
-        matching_label="bottle" (حالة مسح باركود فعلي) ➜ يُعلَّم فقط
-        الكائنات التي تطابق هذه الفئة تحديداً. منتج آخر من فئة مختلفة
-        ومعلَّق بانتظار المسح بنفس اللحظة يجب ألا يتأثر بمسح منتج غيره.
-        """
         from cv.receipt_monitor import _labels_match
         for obj in self.tracker.get_tracked(session_id).values():
             if matching_label is None or _labels_match(matching_label, obj.label):
                 obj.verified = True
 
-    # ── Frame analysis (from a camera feed) ──────────────────────────────
     async def analyze_frame(
         self,
         frame_bytes: bytes,
         session_id: int,
         frame_height: int = 480,
     ) -> List[dict]:
-        """Analyze one camera frame and return the new alerts for this frame."""
         if not self._detector or not CV2_AVAILABLE:
             return []
 
-        # ── تخطّي إطارات لتخفيف حمل المعالج ─────────────────────────────────
-        # عدّاد واحد لكل جلسة يُستخدَم لتحديد استحقاق كل من: كشف المنتجات
-        # (cv_config.ANALYZE_EVERY_N_FRAMES — حرِج للقرار) وكشف اليد
-        # (cv_config.HAND_ANALYZE_EVERY_N_FRAMES — تجميلي فقط، انظر detector.py).
-        # لو ولا واحد منهم مستحق هالإطار، نتخطّى حتى فك تشفير JPEG بالكامل.
-        # القرار مبني على الثواني لا على عدد الإطارات، فهذا لا يغيّر صحّة
-        # القرار، فقط دقّته الزمنية (لا تزال أدق من اللازم بمراحل).
         count = self._frame_counters.get(session_id, 0) + 1
         self._frame_counters[session_id] = count
 
@@ -366,37 +265,22 @@ class TheftDetectionService:
             if frame is None:
                 return []
 
-            # ── كشف تغطية الكاميرا (قماشة/يد أمام العدسة) — مستقل تماماً عن
-            # منطق المنتجات، يعمل على كل إطار مفكوك بغضّ النظر عن run_products.
             self._check_camera_obstruction(session_id, frame)
 
             if run_products:
                 detections = self._detector.detect(frame, run_products=True, run_hands=run_hands)
                 alerts = self.update(session_id, detections, frame.shape[0])
             else:
-                # إطار "يد فقط" — بدون كشف منتجات، فما في تغيير على الـ
-                # tracker ولا على القرار (YOLO لا يُستدعى إطلاقاً هنا).
                 detections = self._detector.detect(frame, run_products=False, run_hands=True)
                 alerts = []
 
             self._publish_preview(session_id, frame, detections)
             return alerts
         except Exception as exc:
-            log.error(f"[CV] Frame analysis error: {exc}")
+            log.error(f"[CV] Frame analysis error: {exc}", exc_info=True)
             return []
 
     def _check_camera_obstruction(self, session_id: int, frame) -> None:
-        """
-        كشف تغطية متعمّدة للعدسة (قماشة/يد/سطح ملاصق) لمنع المراقبة.
-
-        الفكرة: صورة الكاميرا الطبيعية (رفوف/منتجات/يد العميل) فيها تباين
-        نسيجي واضح (تفاصيل، حواف، ألوان مختلفة). تغطية العدسة بالكامل
-        بقماشة أو أي سطح قريب جداً تُنتج صورة شبه متجانسة اللون — انحراف
-        معياري منخفض جداً لقنوات الرمادي. لو استمرّت هذه الحالة
-        CAMERA_OBSTRUCTION_SECONDS (٣ ثوانٍ) متواصلة ➜ فرامل فورية، لأن
-        تعطيل المراقبة عمداً مؤشر خطر بحدّ ذاته، بغضّ النظر عن وجود منتج
-        معلَّق من عدمه.
-        """
         try:
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             std = float(gray.std())
@@ -405,20 +289,12 @@ class TheftDetectionService:
 
         now = time.time()
 
-        # 🔍 لوق تشخيصي/معايرة — يطبع القيمة الحية للانحراف المعياري كل
-        # ثانية تقريباً (بغضّ النظر عن كونها أعلى أو أدنى من العتبة)، حتى
-        # تقدر تشوف الأرقام الفعلية أثناء اختبار التغطية وتضبط
-        # CAMERA_OBSTRUCTION_STD_THRESHOLD بـ cv/config.py حسب إضاءة موقعك
-        # الحقيقية إن لم تكن ١٨.٠ الافتراضية مناسبة. احذف هذا السطر بعد
-        # الانتهاء من المعايرة إن أردت تقليل ضجيج اللوق.
-
         if std >= cv_config.CAMERA_OBSTRUCTION_STD_THRESHOLD:
-            # صورة طبيعية — تصفير أي حالة تغطية متراكمة
             self._obstruction_since.pop(session_id, None)
             return
 
         if now < self._obstruction_cooldown_until.get(session_id, 0.0):
-            return  # صدر تنبيه تغطية مؤخراً لهذه الجلسة — تهدئة
+            return
 
         since = self._obstruction_since.get(session_id)
         if since is None:
@@ -428,7 +304,6 @@ class TheftDetectionService:
         if now - since < cv_config.CAMERA_OBSTRUCTION_SECONDS:
             return
 
-        # ── تغطية مستمرة لأكثر من المهلة ➜ فرامل فورية ──────────────────
         log.warning(colorize(
             f"[CV] Session {session_id}: 🎥🚫 Camera appears obstructed for "
             f"{int(cv_config.CAMERA_OBSTRUCTION_SECONDS)}s (std={std:.1f}) — activating brakes",
@@ -461,13 +336,6 @@ class TheftDetectionService:
         }
 
     def _publish_preview(self, session_id: int, frame, detections: List[dict]) -> None:
-        """
-        أداة معاينة CV (Debug) — routers/cv_preview.py::/cv/preview.
-        تعيد استخدام frame/detections المحسوبة أعلاه بالضبط + tracked/pending
-        الحاليين بعد update()، بدون أي استدلال إضافي (لا YOLO ولا MediaPipe
-        ولا Tracker جديد). فاشلة بصمت إن حدث أي خطأ حتى لا تؤثر على خط
-        الأنابيب الحقيقي (كشف السرقة يبقى يعمل حتى لو تعطّلت المعاينة).
-        """
         try:
             from cv.preview import preview_store, annotate_and_encode
             tracked = self.tracker.get_tracked(session_id)
@@ -476,43 +344,34 @@ class TheftDetectionService:
             if jpeg:
                 preview_store.publish(session_id, jpeg)
         except Exception as exc:
-            # كانت log.debug (مخفية بمستوى INFO الافتراضي) فصار مستحيل تشخيص
-            # لماذا المعاينة فاضية رغم أن الإطارات تُعالَج فعلياً. warning +
-            # exc_info تضمن ظهور السبب الحقيقي باللوق العادي دون كسر خط
-            # الأنابيب الأساسي (لا يزال هذا الاستثناء لا يوقف تحليل السرقة).
-            log.warning(f"[CV] preview publish failed (session {session_id}): {exc}", exc_info=True)
+            self._throttled_log(
+                f"preview_fail:{session_id}", logging.WARNING,
+                f"[CV] preview publish failed (session {session_id}): {exc}",
+            )
 
-    # ── Direct pipeline entrypoint (frame already detected elsewhere) ────
     def update(self, session_id: int, detections: List[dict], frame_height: int) -> List[dict]:
-        """Update tracker state and evaluate the pending scan + return workflows."""
         self.tracker.update(session_id, detections, frame_height)
         alerts = self._evaluate_pending_session(session_id)
         alerts += self._evaluate_pending_return_session(session_id)
         return alerts
 
     def _open_entry_check(self, session_id: int, obj, now: float):
-        """
-        يفتح فحص الدخول الفعلي (عبور مؤكَّد A→B مباشرة، أو دخول سريع تأكَّد
-        بعد نافذة المراقبة) — مُستخرَجة بدالة مستقلة ليُعاد استخدامها من
-        كلا المسارين بدل تكرار نفس المنطق مرتين.
-        يرجع obj لو فُتح تنبيه أو انحلّ فوراً (✅)، أو None لو تم تجاوزه
-        (تحقّق حديثاً لنفس الفئة).
-        """
         if self._was_recently_verified(session_id, obj.label):
             obj.verified = True
-            log.info(colorize(
+            log.debug(colorize(
                 f"[CV] Session {session_id}: 🔁 '{obj.label}' re-detected "
-                f"(track #{obj.track_id}) — already verified recently, ignoring",
+                f"(track #{obj.track_id}) — already verified recently, ignoring "
+                f"{self._factors_str(obj)}",
                 CYAN,
             ))
             return None
 
         log.info(colorize(
-            f"[CV] Session {session_id}: 🚶 CROSSED A→B — "
-            f"product: {obj.label} | accuracy: {getattr(obj, 'conf', 0.0):.2f} (track #{obj.track_id})",
+            f"[CV] Session {session_id}: 🚶 CROSSED A→B — product: {obj.label} "
+            f"{self._factors_str(obj)}",
             CYAN, bold=True,
         ))
-        log.info(colorize(
+        log.debug(colorize(
             f"[CV] Session {session_id}: 🔍 Checking invoice for '{obj.label}'...",
             CYAN,
         ))
@@ -535,25 +394,12 @@ class TheftDetectionService:
         )
         return obj
 
-    # ── Pending scan workflow ────────────────────────────────────────────
     def _evaluate_pending_session(self, session_id: int) -> List[dict]:
         now = time.time()
         tracked = self.tracker.get_tracked(session_id)
         pending = self._pending_products.get(session_id)
         alerts: List[dict] = []
 
-        # ── فتح فحص دخول جديد — بالاعتماد على "ذاكرة المنطقة" الدائمة ──────
-        # (ever_seen_in_a/stable_in_cart) بدل اللحظة الآنية entered_cart —
-        # متين أمام تخطّي الإطارات (ANALYZE_EVERY_N_FRAMES)، ما بيحتاج نمسك
-        # فريم العبور بالظبط. ثلاث حالات فقط (بالضبط كما طُلب):
-        #
-        #   ١) شُوهد بمنطقة A سابقاً، وهلق بمنطقة B ➜ دخول طبيعي مؤكَّد.
-        #      (يفتح الفحص فوراً — لا داعي للانتظار، الدليل قوي أصلاً.)
-        #   ٢) لم يُشاهَد أبداً بمنطقة A، لكنه استقرّ بمنطقة B ولم يتحرّك
-        #      لفترة (stable_in_cart) ➜ دخل دون أن نراه بمنطقة A — يُعامَل
-        #      كمرشّح سرقة (نفس فحص الدخول العادي بالضبط).
-        #   ٣) لم يُشاهَد بمنطقة A، ولسا غير مستقرّ بمنطقة B (احتمال يد
-        #      عابرة أو حركة لسا بالمنتصف) ➜ ننتظر، لا فحص بعد.
         if pending is None:
             if now < self._cooldown_until.get(session_id, 0.0):
                 return alerts
@@ -562,28 +408,23 @@ class TheftDetectionService:
                 if getattr(obj, "verified", False):
                     continue
                 if getattr(obj, "checked_entry", False):
-                    continue  # سبق فحص هذا الـ track — لا تكرار
+                    continue
                 if not getattr(obj, "in_cart_zone", False):
-                    continue  # مو داخل Zone B حالياً أصلاً
+                    continue
 
                 seen_in_a = getattr(obj, "ever_seen_in_a", False)
                 settled = getattr(obj, "stable_in_cart", False)
 
                 if not seen_in_a and not settled:
-                    continue  # (٣) لسا مبكر — انتظر دورة تالية
+                    continue
 
-                # ── قمع إعادة الفتح لنفس المنتج الفعلي ─────────────────
-                # لو نفس الفئة اتحقّقت (✅) خلال آخر RECENT_VERIFIED_WINDOW
-                # ثانية لهذه الجلسة، هذا على الأغلب نفس الغرض الفعلي أعاد
-                # الـ Tracker اكتشافه بـ track_id جديد (اهتزاز/انقطاع لحظي
-                # بالتتبّع) — وليس منتجاً ثانياً حقيقياً عبر لتوّه. تجاهله
-                # بصمت بدل فتح تنبيه زائف على منتج مُتحقَّق منه أصلاً.
                 if self._was_recently_verified(session_id, obj.label):
                     obj.verified = True
                     obj.checked_entry = True
-                    log.info(colorize(
+                    log.debug(colorize(
                         f"[CV] Session {session_id}: 🔁 '{obj.label}' re-detected "
-                        f"(track #{obj.track_id}) — already verified recently, ignoring",
+                        f"(track #{obj.track_id}) — already verified recently, ignoring "
+                        f"{self._factors_str(obj)}",
                         CYAN,
                     ))
                     continue
@@ -592,7 +433,7 @@ class TheftDetectionService:
                     log.info(colorize(
                         f"[CV] Session {session_id}: 🕵️ '{obj.label}' (track #{obj.track_id}) "
                         f"settled in Zone B without ever being seen in Zone A — "
-                        f"treating as a theft candidate",
+                        f"treating as a theft candidate {self._factors_str(obj)}",
                         CYAN, bold=True,
                     ))
 
@@ -606,18 +447,8 @@ class TheftDetectionService:
         if pending is None:
             return alerts
 
-        # ── ⚠️ التغيير الجوهري: مجرّد العبور يكفي لبدء العدّاد — ما بعده
-        # لا يعتمد إطلاقاً على بقاء الغرض ظاهراً بالفريم. سابقاً كان فقدان
-        # الـ track (الغرض دخل جوا السلة/الكيس واختفى عن YOLO — وهو أمر
-        # طبيعي ومتوقَّع تماماً بعد وضع أي منتج بالسلة فعلياً) يُلغي التنبيه
-        # المعلَّق فوراً، فتتوقف دورة (تحذير → فرامل) بمنتصف الطريق كل مرة.
-        # الآن: العدّاد (GRACE_PERIOD → WARNING → SCAN_TIMEOUT → ALARM) يعمل
-        # بالكامل على الزمن الفعلي (time.time())، بغضّ النظر عن استمرار
-        # ظهور الغرض بالفريم من عدمه — تماماً كما يحدث بالواقع الفعلي.
-        tracked_obj = tracked.get(pending.track_id)  # قد يكون None، وهذا متوقَّع وسليم
+        tracked_obj = tracked.get(pending.track_id)
 
-        # ── إعادة محاولة الاستهلاك في كل تقييم لاحق — يلتقط مسحاً وصل
-        # بعد لحظة العبور (العميل وضع المنتج بالسلة ثم مسحه خلال المهلة) ──
         if receipt_monitor.try_consume(session_id, pending.label):
             if tracked_obj is not None:
                 tracked_obj.verified = True
@@ -640,7 +471,6 @@ class TheftDetectionService:
             alert = self._build_warning_alert(session_id, pending)
             alerts.append(alert)
 
-            # يُرسَل مرة واحدة فقط لكل حلقة — لا نغرق نقطة البيع بتحذير لكل إطار
             if not pending.warning_dispatched:
                 pending.warning_dispatched = True
                 log.info(colorize(
@@ -661,14 +491,10 @@ class TheftDetectionService:
             if now - pending.warning_started < cv_config.SCAN_TIMEOUT:
                 return alerts
 
-            # ── انتهت مهلة الـ ٨ ثوانٍ دون مسح ➜ تصعيد ────────────────────
             pending.state = _PendingState.ALARM
             pending.alarm_sent = True
             if tracked_obj is not None:
-                tracked_obj.verified = True  # لا تُعِد إطلاق نفس الإنذار لنفس الجسم لو لسا ظاهر
-            # الغرض فعلياً بالسلة رغم عدم الدفع — لو أُخرج لاحقاً بدون حذفه
-            # من الفاتورة (وهو أصلاً غير موجود بالفاتورة) نريد أن يُكتشَف
-            # أيضاً عبر نفس آلية "خروج بدون حذف مطابق".
+                tracked_obj.verified = True
             self._in_cart_incr(session_id, pending.label, +1)
 
             log.warning(colorize(
@@ -688,30 +514,13 @@ class TheftDetectionService:
 
         return alerts
 
-    # ── Pending RETURN workflow (B→A — منتج أُخرج من السلة) ────────────────
     def _evaluate_pending_return_session(self, session_id: int) -> List[dict]:
-        """
-        نظير _evaluate_pending_session لكن باتجاه معاكس: عبور B→A
-        (`obj.left_cart`) بدل A→B. لا فرامل هنا إطلاقاً بالتصميم — تحذير
-        أصفر واحد فقط إن لم يُحذف المنتج من الفاتورة خلال RETURN_GRACE_PERIOD.
-        """
         now = time.time()
         tracked = self.tracker.get_tracked(session_id)
         pending = self._pending_returns.get(session_id)
         alerts: List[dict] = []
 
         if pending is None:
-            # ── ⚠️ إشارة إرجاع مستهدَفة (جديدة، أضيق من المسار القديم
-            # المحذوف): لو فيه "فحص دخول" مفتوح فعلياً حالياً (منتج عبر
-            # A→B ولسا ما انحلّ)، وظهر track **جديد كلياً** بمنطقة A بنفس
-            # الفئة تحديداً — هذا سياق قوي وموثوق (مش تخمين عام كالمسار
-            # القديم): على الأغلب نفس الغرض "المفقود" (فقدت الكاميرا
-            # تتبّعه أثناء إخراجه بسرعة، فأعاد الـ Tracker اكتشافه بـ
-            # track_id جديد بمنطقة المسح). بعكس المسار القديم المحذوف
-            # (كان يفحص أي رصيد تاريخي "بالسلة" لأي غرض ثانٍ)، هذا مقيَّد
-            # حصراً بوجود فحص دخول *مفتوح الآن* لنفس الفئة — فلا يتأثر
-            # بشراء قطعة ثانية شرعية من نفس الصنف (حالة لا يوجد لها فحص
-            # دخول معلَّق أصلاً وقت ظهورها).
             entry_pending = self._pending_products.get(session_id)
             if entry_pending is not None:
                 for obj in tracked.values():
@@ -724,7 +533,7 @@ class TheftDetectionService:
                             f"[CV] Session {session_id}: 🔎 '{obj.label}' (track #{obj.track_id}) "
                             f"re-appeared in Zone A matching the currently-open entry-check for "
                             f"'{entry_pending.label}' — treating as the same item being returned, "
-                            f"cancelling entry-check, switching to return-check",
+                            f"cancelling entry-check, switching to return-check {self._factors_str(obj)}",
                             CYAN,
                         ))
                         if entry_pending.warning_dispatched:
@@ -753,28 +562,15 @@ class TheftDetectionService:
                         return alerts
 
             for obj in tracked.values():
-                # ── ⚠️ المُحفِّز صار "ذاكرة دائمة" بدل اللحظة الآنية: أي
-                # جسم شُوهد بمنطقة B (ولو مرة واحدة، بأي وقت خلال عمر هذا
-                # الـ track) وهلق موجود بمنطقة A ولم يُفحَص كإرجاع من قبل
-                # — بغضّ النظر عن كون فريم لحظة العبور بالضبط قد حُلِّل أو
-                # لأ (متين أمام تخطّي الإطارات ANALYZE_EVERY_N_FRAMES).
                 if getattr(obj, "checked_return", False):
                     continue
                 if getattr(obj, "in_cart_zone", True):
-                    continue  # لسا بمنطقة B، مو بـA
+                    continue
                 if not getattr(obj, "ever_seen_in_b", False):
-                    continue  # ما كان بالسلة أبداً — لا علاقة له بالإرجاع
+                    continue
 
                 obj.checked_return = True
 
-                # ── ⚠️ لو نفس هذا الـ track كان له "فحص دخول" معلَّق (فتحناه
-                # سابقاً لحظة عبوره A→B) ولسا ما انحلّ، وهلق طلع إنه عبر فوراً
-                # برّا (B→A) — يعني الغرض مرّ مروراً سريعاً بالسلة ولم يستقرّ
-                # فعلياً فيها. بهذه الحالة لا داعي إطلاقاً لفحص "هل أُضيف
-                # للفاتورة" (منطق الدخول) — نُلغيه بالكامل بصمت (بدون أي
-                # تحذير/فرامل) ونكتفي بفحص "هل حُذف من الفاتورة" (منطق
-                # الإرجاع) فقط، لأنه هذا بالضبط سيناريو "شافه في B ومرّ لA
-                # مباشرة: ما في أي مشكلة، بس افحص لوجيك الإرجاع".
                 entry_pending = self._pending_products.get(session_id)
                 if entry_pending is not None and entry_pending.track_id == obj.track_id:
                     log.info(colorize(
@@ -783,29 +579,22 @@ class TheftDetectionService:
                         f"switching fully to return-check",
                         CYAN,
                     ))
-                    # لو كان تحذير أصفر قد وصل فعلاً لنقطة البيع (warning_dispatched)
-                    # قبل ما نكتشف هذا العبور، لازم نُعلِم الواجهة إنه انحلّ —
-                    # وإلا تبقى شاشة التحذير ظاهرة للعميل بلا داعٍ حتى تنتهي
-                    # مهلتها من نفسها (٨ ثوانٍ) رغم أن لا مشكلة فعلياً.
                     if entry_pending.warning_dispatched:
                         self._dispatch_cleared(session_id)
                     self._clear_pending_product(session_id)
 
                 log.info(colorize(
-                    f"[CV] Session {session_id}: 🚶 CROSSED B→A (returned) — "
-                    f"product: {obj.label} | accuracy: {getattr(obj, 'conf', 0.0):.2f} (track #{obj.track_id})",
+                    f"[CV] Session {session_id}: 🚶 CROSSED B→A (returned) — product: {obj.label} "
+                    f"{self._factors_str(obj)}",
                     CYAN, bold=True,
                 ))
-                log.info(colorize(
+                log.debug(colorize(
                     f"[CV] Session {session_id}: 🔍 Checking invoice for removal of '{obj.label}'...",
                     CYAN,
                 ))
 
-                # الغرض عمليّاً خرج من السلة (بالطريقتين) — يُستهلَك من
-                # عدّاد "بالسلة" فوراً هون، بغضّ النظر عن نتيجة فحص الفاتورة.
                 self._in_cart_consume_one(session_id, obj.label)
 
-                # استهلاك فوري — يلتقط حذفاً صار قبل أو بعد الإخراج فعلياً
                 if receipt_monitor.try_consume_removal(session_id, obj.label):
                     log.info(colorize(
                         f"[CV] Session {session_id}: ✅ '{obj.label}' removal matched on "
@@ -825,8 +614,6 @@ class TheftDetectionService:
         if pending is None:
             return alerts
 
-        # نفس فلسفة سير عمل الدخول: العدّاد يعمل بالزمن الفعلي، بغضّ النظر
-        # عن استمرار ظهور الغرض بالفريم من عدمه.
         if receipt_monitor.try_consume_removal(session_id, pending.label):
             self._pending_returns.pop(session_id, None)
             log.info(colorize(
@@ -850,7 +637,6 @@ class TheftDetectionService:
             self._dispatch_theft_alert(session_id, alert)
             self._dispatch_dashboard_alert(session_id, alert)
             alerts.append(alert)
-            # تحذير واحد فقط ثم إغلاق — لا تصعيد ولا نطارد نفس الحالة للأبد
             self._pending_returns.pop(session_id, None)
 
         return alerts
@@ -868,7 +654,7 @@ class TheftDetectionService:
             ),
             "session_id": session_id,
             "zone": "Scan",
-            "grace_seconds": None,   # توست بسيط بدل عدّاد تنازلي — ليست حالة تصعيد
+            "grace_seconds": None,
             "brake_activated": False,
         }
 
@@ -883,7 +669,6 @@ class TheftDetectionService:
             "description": f"Product ({pending.label}) placed in cart — please scan it.",
             "session_id": session_id,
             "zone": "Cart",
-            # مدة العدّ التنازلي على شاشة نقطة البيع (٨ ثوانٍ)
             "grace_seconds": cv_config.SCAN_TIMEOUT,
             "seconds_remaining": max(0.0, round(cv_config.SCAN_TIMEOUT - elapsed, 1)),
             "brake_activated": False,
@@ -910,13 +695,19 @@ class TheftDetectionService:
         if self._on_theft_detected:
             self._schedule(self._on_theft_detected(session_id, alert))
         else:
-            log.warning("[CV] No theft callback registered; skipping theft alert dispatch")
+            self._throttled_log(
+                "no_theft_cb", logging.WARNING,
+                "[CV] No theft callback registered; skipping theft alert dispatch",
+            )
 
     def _dispatch_dashboard_alert(self, session_id: int, alert: dict):
         if self._on_dashboard_alert:
             self._schedule(self._on_dashboard_alert(session_id, alert))
         else:
-            log.warning("[CV] Dashboard alert callback not configured")
+            self._throttled_log(
+                "no_dashboard_cb", logging.WARNING,
+                "[CV] Dashboard alert callback not configured",
+            )
 
     def _dispatch_cleared(self, session_id: int):
         if self._on_cleared_callback:
@@ -926,15 +717,13 @@ class TheftDetectionService:
         if self._on_brake_callback:
             self._schedule(self._on_brake_callback(session_id, alert))
         else:
-            log.warning("[CV] Brake callback not configured")
+            self._throttled_log(
+                "no_brake_cb", logging.WARNING,
+                "[CV] Brake callback not configured",
+            )
 
     @staticmethod
     def _schedule(coro):
-        """
-        تشغيل الـ callback بأمان. update() قد تُستدعى من سياق متزامن
-        (webcam_test.py مثلاً) حيث لا يوجد event loop شغّال، فيرمي
-        asyncio.create_task استثناء RuntimeError ويُسقط التحليل كله.
-        """
         try:
             asyncio.get_running_loop().create_task(coro)
         except RuntimeError:
@@ -942,14 +731,6 @@ class TheftDetectionService:
             log.debug("[CV] No running event loop — alert callback skipped (offline mode)")
 
     def _clear_pending_product(self, session_id: int, matching_label: str = None):
-        """
-        matching_label=None ➜ يُلغى المعلَّق الحالي لهذه الجلسة بلا شرط
-        (acknowledge_session اليدوي، أو حالات داخلية أخرى كانت تُلغي دائماً).
-
-        matching_label="bottle" ➜ يُلغى فقط لو كان المنتج المعلَّق حالياً
-        من نفس الفئة الممسوحة. لو فيه منتج آخر معلَّق من فئة مختلفة، يبقى
-        كما هو — مسح "bottle" لا يجوز أن يُسقِط تنبيهاً معلَّقاً على "chips".
-        """
         pending = self._pending_products.get(session_id)
         if pending is None:
             return
@@ -962,18 +743,10 @@ class TheftDetectionService:
 
     @property
     def has_pending(self) -> bool:
-        """Return True when at least one pending product exists for any session."""
         return len(self._pending_products) > 0
 
     def has_pending_for(self, session_id: int) -> bool:
-        """
-        نظير has_pending لكن لجلسة محدَّدة فقط — has_pending العامة كانت
-        تتحقق عبر كل الجلسات النشطة معاً، وهو غير دقيق عند استخدامه من
-        alert_handler.py::_poll_invoice_and_clear_early لمعرفة "هل لسا
-        فيه تنبيه معلَّق لنفس هذه الجلسة تحديداً".
-        """
         return session_id in self._pending_products
 
 
-# ── Singleton ─────────────────────────────────────────────────────────────
 theft_service = TheftDetectionService()

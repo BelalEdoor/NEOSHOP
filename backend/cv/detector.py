@@ -27,6 +27,29 @@ config.PRODUCT_CLASSES/HAND_CLASSES.
 import logging
 from typing import List, Optional
 
+# ── ⚠️ حماية من باگ بمكتبة platform القياسية (بايثون 3.10 على ماك،
+# خصوصاً Apple Silicon): platform._Processor.get() — الدالة الداخلية
+# يلي يعتمد عليها *كل* من platform.processor() و platform.uname()
+# لجلب اسم المعالج عبر sysctl/uname بالـ subprocess — ممكن ترجع None
+# بدل نص بهاي البيئة، فتنهار داخلياً بـ .strip(). هاد بينكسر
+# ultralytics.get_cpu_info() (يستورد py-cpuinfo، ويلي بدوره يستدعي
+# platform.uname() *وقت تعريف الكلاس نفسه* — يعني بايثون ما بتكاش
+# الاستيراد الفاشل، فبيتكرر الخطأ على كل استدعاء YOLO/كل فريم كاميرا).
+# ترقيع _Processor.get() هون (المصدر المشترك للطريقتين) بيغطي الحالتين
+# معاً، بغض النظر عن أي مسار استدعاهم.
+import platform as _platform
+
+if hasattr(_platform, "_Processor"):
+    _orig_processor_get = _platform._Processor.get
+
+    def _safe_processor_get():
+        try:
+            return _orig_processor_get() or ""
+        except Exception:
+            return ""
+
+    _platform._Processor.get = staticmethod(_safe_processor_get)
+
 from core.config import settings
 from cv import config as cv_config
 

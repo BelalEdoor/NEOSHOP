@@ -33,6 +33,8 @@ def _labels_match(a: str, b: str) -> bool:
     (مثال: "can" هي substring من "candy" — تطابق تقريبي كان يعتبرهما
     نفس الفئة خطأً؛ التامة تفرّق بينهما بشكل قاطع).
     """
+    if not a or not b:
+        return False
     a, b = a.strip().lower(), b.strip().lower()
     if not a or not b:
         return False
@@ -93,7 +95,7 @@ class ReceiptMonitor:
 
     @staticmethod
     def _try_consume_pool(pool: Optional[Counter], expected_label: str) -> bool:
-        if not pool:
+        if not pool or not expected_label:
             return False
         needle = expected_label.strip().lower()
         for label, count in list(pool.items()):

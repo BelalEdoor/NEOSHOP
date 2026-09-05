@@ -164,13 +164,28 @@ class MQTTService:
 
     def publish(self, topic: str, payload: dict, qos: int = 1) -> bool:
         """نشر رسالة على topic معيّن."""
-        if not self._client or not self._connected:
-            log.warning(f"[MQTT] Not connected — cannot publish to {topic}")
+        # FIXED — self._connected بينحدّث بس جوا on_connect/on_disconnect،
+        # يلي بتشتغل بخيط شبكة paho المنفصل بشكل غير متزامن. ممكن يصير
+        # انقطاع لحظي فعلي بالسوكيت بينما self._connected لسا True عندنا
+        # (الـ callback لسا ما وصل). is_connected() من paho نفسه بيعكس
+        # حالة السوكيت الحقيقية بلحظتها، فمنستخدمه كفحص إضافي حي.
+        if not self._client or not self._connected or not self._client.is_connected():
+            log.warning(
+                f"[MQTT] Not connected — cannot publish to {topic} "
+                f"(flag={self._connected}, live={self._client.is_connected() if self._client else None})"
+            )
             return False
         try:
             result = self._client.publish(topic, json.dumps(payload), qos=qos)
+            if result.rc != 0:
+                # FIXED — كانت هاي الحالة (rc != 0، أشيعها MQTT_ERR_NO_CONN=4)
+                # تُسجَّل فقط ضمن log.debug العام تحتها، يلي غالباً مستوى
+                # تسجيله أوطى من المعروض، فكانت تفشل بصمت تام بدون أي أثر
+                # بالسجل. صرنا نسجلها صراحة كـ warning مع رمز الخطأ.
+                log.warning(f"[MQTT] Publish to {topic} returned rc={result.rc} (not queued)")
+                return False
             log.debug(f"[MQTT] Published [{topic}]: {payload}")
-            return result.rc == 0
+            return True
         except Exception as e:
             log.error(f"[MQTT] Publish error: {e}")
             return False
