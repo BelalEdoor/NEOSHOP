@@ -1,5 +1,7 @@
 """Seed database with products and demo users"""
+import csv
 import sys, os
+from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from core.database import SessionLocal, engine, Base
@@ -36,8 +38,33 @@ PRODUCTS = [
 
 
 def seed_products_only(db):
-    """Called by main.py auto-seed — products only, users already created"""
-    for p in PRODUCTS:
+    """Seed the complete catalog for main.py auto-seed."""
+    catalog_path = Path(__file__).parent / "database" / "products.csv"
+    if catalog_path.exists():
+        numeric_fields = {
+            "price", "quantity", "location_x", "location_y", "calories",
+            "sugar_g", "sodium_mg", "protein_g", "fat_g", "saturated_fat_g",
+            "carbohydrates_g", "fiber_g", "cholesterol_mg", "old_price",
+        }
+        boolean_fields = {
+            "is_vegan", "is_vegetarian", "is_gluten_free", "is_lactose_free", "is_on_offer",
+        }
+        products = []
+        with catalog_path.open(newline="", encoding="utf-8-sig") as catalog_file:
+            for row in csv.DictReader(catalog_file):
+                product = {key: (value.strip() or None) for key, value in row.items()}
+                for key in numeric_fields:
+                    if product.get(key) is not None:
+                        product[key] = float(product[key])
+                        if key in {"quantity", "location_x", "location_y"}:
+                            product[key] = int(product[key])
+                for key in boolean_fields:
+                    product[key] = str(product.get(key)).lower() == "true"
+                products.append(product)
+    else:
+        products = PRODUCTS
+
+    for p in products:
         db.add(Product(**p))
     db.commit()
 

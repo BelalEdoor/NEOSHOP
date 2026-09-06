@@ -60,6 +60,7 @@ export default function AIModelPage() {
         const { data } = await analysisApi.aiAnalysis(product.id)
         setResult((prev) => prev ? {
           ...prev,
+          allergenResult: data.allergen_check || prev.allergenResult,
           recEngine: {
             productHealth: data.product_health,
             recommendations: data.recommendations || [],
@@ -90,6 +91,10 @@ export default function AIModelPage() {
       toast.error(err.response?.data?.detail || 'فشل الإضافة')
     }
   }
+
+  const isResultSafe = Boolean(
+    result?.allergenResult?.is_safe && result?.recEngine?.productHealth?.safe !== false
+  )
 
   return (
     <div className="max-w-2xl mx-auto">
@@ -158,18 +163,18 @@ export default function AIModelPage() {
             </div>
 
             {/* Safety Status */}
-            <div className={`mt-4 p-3 rounded-xl flex items-center gap-3 ${result.allergenResult.is_safe ? '' : ''}`}
+            <div className="mt-4 p-3 rounded-xl flex items-center gap-3"
               style={{
-                background: result.allergenResult.is_safe ? '#dcfce7' : '#fef2f2',
-                border: `1px solid ${result.allergenResult.is_safe ? '#86efac' : '#fca5a5'}`
+                background: isResultSafe ? '#dcfce7' : '#fef2f2',
+                border: `1px solid ${isResultSafe ? '#86efac' : '#fca5a5'}`
               }}>
-              {result.allergenResult.is_safe
+              {isResultSafe
                 ? <CheckCircle className="w-5 h-5 flex-shrink-0" style={{ color: '#16a34a' }} />
                 : <AlertTriangle className="w-5 h-5 flex-shrink-0" style={{ color: '#dc2626' }} />
               }
               <div>
-                <p className="font-bold text-sm" style={{ color: result.allergenResult.is_safe ? '#15803d' : '#b91c1c' }}>
-                  {result.allergenResult.is_safe ? '✅ ' + t('safeProduct') : '⚠️ ' + t('unsafeProduct')}
+                <p className="font-bold text-sm" style={{ color: isResultSafe ? '#15803d' : '#b91c1c' }}>
+                  {isResultSafe ? '✅ ' + t('safeProduct') : '⚠️ ' + t('unsafeProduct')}
                 </p>
                 {result.allergenResult.matched_allergens?.length > 0 && (
                   <div className="flex gap-1 mt-1 flex-wrap">

@@ -152,6 +152,14 @@ def _auto_seed():
             except Exception as e:
                 log.warning(f"Could not seed products: {e}")
 
+        # Seed recommendation reference data used by customer onboarding.
+        try:
+            from seed_recommendation_engine import seed as seed_recommendation_data
+            seed_recommendation_data()
+            log.info("✓ Recommendation options seeded")
+        except Exception as e:
+            log.warning(f"Could not seed recommendation options: {e}")
+
     except Exception as e:
         log.warning(f"Seed warning: {e}")
         db.rollback()

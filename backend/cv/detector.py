@@ -64,6 +64,29 @@ except ImportError:
     YOLO_AVAILABLE = False
     log.warning("[CV] ultralytics not installed — theft detection disabled")
 
+
+def _load_yolo_model(model_path: str):
+    """Load the application's trusted local YOLO checkpoint."""
+    try:
+        return YOLO(model_path)
+    except Exception as error:
+        if "Weights only load failed" not in str(error):
+            raise
+
+        import torch
+
+        original_torch_load = torch.load
+
+        def load_with_trusted_checkpoint(*args, **kwargs):
+            kwargs.setdefault("weights_only", False)
+            return original_torch_load(*args, **kwargs)
+
+        torch.load = load_with_trusted_checkpoint
+        try:
+            return YOLO(model_path)
+        finally:
+            torch.load = original_torch_load
+
 try:
     import cv2
     CV2_AVAILABLE = True
@@ -83,7 +106,7 @@ class Detector:
     def __init__(self):
         if not YOLO_AVAILABLE:
             raise RuntimeError("ultralytics is not installed")
-        self.model = YOLO(settings.YOLO_MODEL_PATH)
+        self.model = _load_yolo_model(settings.YOLO_MODEL_PATH)
         log.info(f"[CV] YOLOv8 model loaded: {settings.YOLO_MODEL_PATH} | classes: {self.model.names}")
 
         self._hands = None
