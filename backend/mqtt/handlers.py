@@ -81,10 +81,20 @@ async def handle_payment_request(topic: str, payload: dict):
         session.payment_started_at = datetime.now(timezone.utc)
         invoice.status = InvoiceStatus.PROCESSING
 
+        # ⚠️ FIX — المبلغ الذي تطلبه آلة الدفع من العميل يجب أن يكون شيكلاً
+        # صحيحاً (الآلة لا تملك عملة/ورقة أصغر من 1 شيكل)، بينما سعر الفاتورة
+        # (invoice.total_amount) غالباً كسري (أسعار المنتجات فيها أغورات،
+        # مثال 4.99). قبل هذا الإصلاح كان total_due يُرسَل للجهاز كما هو
+        # بكسوره، فيضطر ESP32 لتقريب "الباقي" بعد استلام النقود فعلياً —
+        # بالضبط اللحظة الخطأ لإجراء التقريب — مما يُفقد أو يُضيف حتى نصف
+        # شيكل بصمت بكل عملية. نقرّب المبلغ *هنا*، قبل ما يوصل للجهاز أصلاً.
+        from core.cash_rounding import round_to_cash_unit
+        cash_due = round_to_cash_unit(invoice.total_amount)
+
         # إنشاء سجل دفع جديد
         payment = Payment(
             invoice_id=invoice.id,
-            total_due=invoice.total_amount,
+            total_due=cash_due,
             cart_rfid=cart_rfid,
             status=PaymentStatus.IN_PROGRESS,
         )
@@ -92,18 +102,26 @@ async def handle_payment_request(topic: str, payload: dict):
         db.commit()
         db.refresh(payment)
 
-        # إرسال بيانات الفاتورة إلى ESP32
+        if cash_due != invoice.total_amount:
+            log.info(
+                f"[MQTT] Cash rounding applied for payment {payment.id}: "
+                f"invoice={invoice.total_amount} → cash_due={cash_due}"
+            )
+
+        # إرسال بيانات الفاتورة إلى ESP32 — total_amount هنا هو المبلغ
+        # النقدي المقرَّب (cash_due)، وليس سعر الفاتورة الخام، حتى يطابق
+        # تماماً ما تقدر آلة الدفع فعلياً تطلبه/ترجعه بعملات صحيحة.
         mqtt_service.publish_invoice_to_esp32({
             "cart_rfid":     cart_rfid,
             "invoice_id":    invoice.id,
             "invoice_code":  invoice.invoice_code,
             "session_id":    session.id,
-            "total_amount":  invoice.total_amount,
+            "total_amount":  cash_due,
             "payment_id":    payment.id,
             "items":         json.loads(invoice.items_json or "[]"),
         })
 
-        log.info(f"[MQTT] Invoice sent to ESP32 for RFID={cart_rfid}, amount={invoice.total_amount}")
+        log.info(f"[MQTT] Invoice sent to ESP32 for RFID={cart_rfid}, amount={cash_due}")
 
         # إشعار WebSocket للـ Frontend
         if ws_manager:

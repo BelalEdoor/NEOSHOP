@@ -243,7 +243,7 @@
 // ─── WiFi & MQTT Config ───────────────────────────────────────────────────────
 const char* WIFI_SSID   = "CELab";
 const char* WIFI_PASS   = "CELabC207";
-const char* MQTT_BROKER = "192.168.0.100";
+const char* MQTT_BROKER = "192.168.0.123";
 const int   MQTT_PORT   = 1883;
 const char* MQTT_USER   = "neoshop";
 const char* MQTT_PASS_S = "neoshop_mqtt_pass";
