@@ -21,16 +21,19 @@ from websocket_router import manager as ws_manager
 from mqtt.client import mqtt_service
 
 
-async def _publish_refill_done_with_retry(payment_id: int, attempts: int = 5, delay: float = 0.5) -> bool:
+async def _publish_refill_done_with_retry(payment_id: int, attempts: int = 20, delay: float = 1.0) -> bool:
     """
-    نفس mqtt_service.publish_refill_done، بس مع محاولات قصيرة متكررة
-    (حتى ~2.5 ثانية إجمالاً) قبل ما نستسلم.
+    نفس mqtt_service.publish_refill_done، بس مع محاولات متكررة (حتى ~20
+    ثانية إجمالاً) قبل ما نستسلم.
 
-    السبب: paho-mqtt عنده إعادة اتصال تلقائي (reconnect_delay_set) بيبدأ
-    خلال ~1 ثانية من أي انقطاع لحظي (شائع مع WiFi). لو المستخدم ضغط الزر
-    بالضبط جوا هالثانية، publish() العادية بترجع False فورًا بدون ما
-    تعطي فرصة لإعادة الاتصال تخلص. هالدالة بتنتظر بشكل غير حاجب
-    (asyncio.sleep، مش time.sleep) بين المحاولات.
+    السبب: reconnect_delay_set(min_delay=1, max_delay=120) بملف
+    mqtt/client.py بيعني إنه بعد أي انقطاع (حتى لو صار قبل شوي، مو
+    بالضبط لحظة الضغط على الزر)، paho ممكن يدخل بفترة backoff توصل
+    لعشرات الثواني قبل ما يعيد الاتصال فعليًا. المحاولة القديمة (5×0.5s
+    = 2.5 ثانية) كانت غالبًا أقصر من فترة الـ backoff هاي، فكانت ترجّع
+    خطأ 503 "MQTT unreachable" حتى لو الـ broker شغال وراجع يتصل بعد
+    شوي. هالدالة بتنتظر بشكل غير حاجب (asyncio.sleep، مش time.sleep)
+    بين المحاولات.
     """
     for i in range(attempts):
         if mqtt_service.publish_refill_done(payment_id):
@@ -313,8 +316,18 @@ async def force_reactivate(
     db.commit()
     db.refresh(payment)
 
-    sent = await _publish_refill_done_with_retry(payment_id)
     if not sent:
+        # FIXED — كانت هاي الحالة تسيب payment.status عالقة على IN_PROGRESS
+        # للأبد بقاعدة البيانات بينما الـ ESP32 (يلي أصلاً ما استلم
+        # refill_done) يضل واقف بـ STATE_WAITING_REFILL — دفعة "يتيمة"
+        # حقيقية ما بيقدر زر "تأكيد التعبئة" العادي يلمسها بعدين (بيرفضها
+        # بـ 400 لأنه status مش AWAITING_REFILL). نفس منطق confirm_refill
+        # بالضبط: نرجّع الحالة عشان الأدمن يقدر يعيد المحاولة بشكل طبيعي.
+        payment.status = PaymentStatus.AWAITING_REFILL
+        if session:
+            session.status = CartStatus.AWAITING_REFILL
+        db.commit()
+        db.refresh(payment)
         raise HTTPException(503, "MQTT broker unreachable — could not notify the payment station")
 
     # هون منسجّل الحل يدويًا بغض النظر عن رد فعل الجهاز، لأنه أصلاً كانت

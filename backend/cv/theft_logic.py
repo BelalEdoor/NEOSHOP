@@ -532,17 +532,42 @@ class TheftDetectionService:
                         log.info(colorize(
                             f"[CV] Session {session_id}: 🔎 '{obj.label}' (track #{obj.track_id}) "
                             f"re-appeared in Zone A matching the currently-open entry-check for "
-                            f"'{entry_pending.label}' — item was taken back out before it was ever "
-                            f"scanned/verified, so it was never added to the invoice in the first "
-                            f"place. Cancelling entry-check ONLY — deliberately NOT running an "
-                            f"invoice-removal check here (there is nothing to remove), which used "
-                            f"to fire a misleading ITEM_RETURNED_NOT_REMOVED alert even when no "
-                            f"invoice/line existed for this item {self._factors_str(obj)}",
+                            f"'{entry_pending.label}' — treating as the same item being returned, "
+                            f"cancelling entry-check, switching to return-check {self._factors_str(obj)}",
                             CYAN,
                         ))
                         if entry_pending.warning_dispatched:
                             self._dispatch_cleared(session_id)
                         self._clear_pending_product(session_id)
+
+                        log.info(colorize(
+                            f"[CV] Session {session_id}: 🔍 Checking invoice for removal of "
+                            f"'{obj.label}'...",
+                            CYAN,
+                        ))
+                        was_on_invoice = self._in_cart_has(session_id, obj.label)
+                        self._in_cart_consume_one(session_id, obj.label)
+
+                        if receipt_monitor.try_consume_removal(session_id, obj.label):
+                            log.info(colorize(
+                                f"[CV] Session {session_id}: ✅ '{obj.label}' removal matched on "
+                                f"invoice — situation normal",
+                                GREEN, bold=True,
+                            ))
+                        elif was_on_invoice:
+                            self._pending_returns[session_id] = _PendingReturn(
+                                track_id=obj.track_id,
+                                label=obj.label,
+                                left_time=now,
+                            )
+                        else:
+                            # المنتج أصلاً مش مسجّل على الفاتورة (ما تم مسحه قط) —
+                            # ما في شي يُحذف، فلا داعي لأي تحذير "لم يُحذف من الفاتورة".
+                            log.info(colorize(
+                                f"[CV] Session {session_id}: ℹ️ '{obj.label}' was never on the "
+                                f"invoice — no removal needed, ignoring",
+                                CYAN,
+                            ))
                         return alerts
 
             for obj in tracked.values():
@@ -557,26 +582,15 @@ class TheftDetectionService:
 
                 entry_pending = self._pending_products.get(session_id)
                 if entry_pending is not None and entry_pending.track_id == obj.track_id:
-                    # ⚠️ FIX: هذا الجسم كان لسا بمرحلة "بانتظار مسح" (لم يُتحقّق منه
-                    # على الفاتورة إطلاقاً بعد) — فما في أي سطر فاتورة لإزالته. سابقاً
-                    # كان الكود يتابع بالأسفل ويشغّل try_consume_removal رغم ذلك، وبما
-                    # إنه أكيد رح يفشل (العنصر أصلاً مش على الفاتورة)، كان يولّد تنبيه
-                    # مضلِّل "تم إخراج منتج من السلة لكن لم يُزَل من الفاتورة" حتى لو
-                    # الفاتورة فاضية أو ما فيها هالمنتج أصلاً. الإصلاح: نلغي فحص
-                    # الدخول ونطلع (continue) فوراً بدون أي فحص إزالة — لا شيء
-                    # للتحقق منه لأن المنتج لم يُضَف للفاتورة قط.
                     log.info(colorize(
                         f"[CV] Session {session_id}: ↩️ '{obj.label}' (track #{obj.track_id}) "
-                        f"left before it was ever scanned/verified — cancelling entry-check. "
-                        f"No invoice line ever existed for it, so skipping the return/removal "
-                        f"check entirely (previously this fell through and raised a misleading "
-                        f"'not removed from invoice' alert) {self._factors_str(obj)}",
+                        f"passed through to Zone A before settling — cancelling entry-check, "
+                        f"switching fully to return-check",
                         CYAN,
                     ))
                     if entry_pending.warning_dispatched:
                         self._dispatch_cleared(session_id)
                     self._clear_pending_product(session_id)
-                    continue
 
                 log.info(colorize(
                     f"[CV] Session {session_id}: 🚶 CROSSED B→A (returned) — product: {obj.label} "
@@ -588,6 +602,7 @@ class TheftDetectionService:
                     CYAN,
                 ))
 
+                was_on_invoice = self._in_cart_has(session_id, obj.label)
                 self._in_cart_consume_one(session_id, obj.label)
 
                 if receipt_monitor.try_consume_removal(session_id, obj.label):
@@ -595,6 +610,16 @@ class TheftDetectionService:
                         f"[CV] Session {session_id}: ✅ '{obj.label}' removal matched on "
                         f"invoice — situation normal",
                         GREEN, bold=True,
+                    ))
+                    continue
+
+                if not was_on_invoice:
+                    # المنتج أصلاً مش مسجّل على الفاتورة (ما تم مسحه قط) —
+                    # ما في شي يُحذف، فلا داعي لأي تحذير "لم يُحذف من الفاتورة".
+                    log.info(colorize(
+                        f"[CV] Session {session_id}: ℹ️ '{obj.label}' was never on the "
+                        f"invoice — no removal needed, ignoring",
+                        CYAN,
                     ))
                     continue
 
